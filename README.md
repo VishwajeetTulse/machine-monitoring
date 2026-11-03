@@ -5,7 +5,6 @@ downtime analysis and OEE.
 
 ## Layout
 
-- `collector/` — FOCAS client, reads from FANUC controllers
 - `operations/` — monitoring logic, one file per operation
 - `analysis/` — exploration scripts
 - `data/` — generated datasets (gitignored)
