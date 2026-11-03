@@ -6,7 +6,6 @@ venv64/
 lib/
 
 # generated data
-data/*.csv
 data/*.parquet
 
 # python
