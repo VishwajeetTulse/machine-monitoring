@@ -1,0 +1,22 @@
+# virtual environments
+venv32/
+venv64/
+
+# FANUC FOCAS binaries - licensed, do not distribute
+lib/
+
+# generated data
+data/*.csv
+data/*.parquet
+
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# editors / OS
+.vscode/
+.cursor/
+.idea/
+Thumbs.db
+desktop.ini
