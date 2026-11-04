@@ -5,11 +5,12 @@ import pandas as pd
 from test_classification import classify_frame, NO_DATA
 from state_events import to_events, mark_setup
 from availability import availability
+from settings import load_settings
 
 GAP_SECONDS = 5
 
 
-def find_gaps(df):
+def find_gaps(df, gap_seconds=GAP_SECONDS):
 
     d = df[["machine_code", "timestamp"]].copy()
     d["timestamp"] = pd.to_datetime(d["timestamp"])
@@ -20,7 +21,7 @@ def find_gaps(df):
     # seconds since the reading before, per machine
     d["since_last"] = d.groupby("machine_code")["timestamp"].diff().dt.total_seconds()
 
-    gaps = d[d["since_last"] > GAP_SECONDS].copy()
+    gaps = d[d["since_last"] > gap_seconds].copy()
 
     # the first and last missing second
     # normal spacing is 1 second, so one less than the wait is missing
@@ -33,13 +34,13 @@ def find_gaps(df):
     ).reset_index(drop=True)
 
 
-def fill_gaps(df):
+def fill_gaps(df, gap_seconds=GAP_SECONDS):
     # call this AFTER classify_frame, so the new rows keep the NO_DATA state
 
     df = df.copy()
     df["timestamp"] = pd.to_datetime(df["timestamp"])
 
-    gaps = find_gaps(df)
+    gaps = find_gaps(df, gap_seconds)
     if gaps.empty:
         return df
 
@@ -84,11 +85,14 @@ def coverage(events):
 
 if __name__ == "__main__":
 
+    s = load_settings("settings/example_client.json")
+    gap = s["gap_seconds"]
+
     df = pd.read_csv("data/cnc_sim_data.csv", low_memory=False)
 
     df["state"] = classify_frame(df)
 
-    print("gaps in the real file:", len(find_gaps(df)))
+    print("gaps in the real file:", len(find_gaps(df, gap)))
     print()
 
     # test: delete 10 minutes of V61 readings, 3 hours into the day
@@ -100,12 +104,12 @@ if __name__ == "__main__":
     print()
 
     print("gaps found:")
-    print(find_gaps(broken).to_string(index=False))
+    print(find_gaps(broken, gap).to_string(index=False))
     print()
 
     ev_whole = mark_setup(to_events(df))
     ev_plain = mark_setup(to_events(broken))
-    ev_marked = mark_setup(to_events(fill_gaps(broken)))
+    ev_marked = mark_setup(to_events(fill_gaps(broken, gap)))
 
     print("coverage:")
     print(coverage(ev_marked).to_string())

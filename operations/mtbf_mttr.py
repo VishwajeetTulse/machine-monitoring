@@ -4,15 +4,24 @@ import pandas as pd
 
 from test_classification import classify_frame, RUNNING, ALARM
 from state_events import to_events, mark_setup
+from settings import load_settings
 
 
-def mtbf_mttr(events):
+def mtbf_mttr(events, failure_codes=()):
 
     # run time per machine
     run_s = events[events["state"] == RUNNING].groupby("machine")["duration_s"].sum()
 
     # one ALARM period = one failure
-    alarms = events[events["state"] == ALARM].groupby("machine")["duration_s"].agg(["count", "sum"])
+    is_alarm = events["state"] == ALARM
+
+    # only the alarm codes the client counts as failures. Empty list = all.
+    if len(failure_codes) > 0:
+        if "alarm_code" not in events.columns:
+            raise ValueError("events table has no alarm_code column")
+        is_alarm = is_alarm & events["alarm_code"].isin(failure_codes)
+
+    alarms = events[is_alarm].groupby("machine")["duration_s"].agg(["count", "sum"])
 
     machines = sorted(events["machine"].unique())
 
@@ -43,14 +52,17 @@ def mtbf_mttr(events):
 
 if __name__ == "__main__":
 
+    s = load_settings("settings/example_client.json")
+    codes = s["failure_alarm_codes"]
+
     df = pd.read_csv("data/cnc_sim_data.csv", low_memory=False)
 
     # real file
     df["state"] = classify_frame(df)
-    events = mark_setup(to_events(df))
+    events = mark_setup(to_events(df), setup_min_seconds=s["setup_min_seconds"])
 
     print("real file:")
-    print(mtbf_mttr(events).to_string())
+    print(mtbf_mttr(events, codes).to_string())
     print()
 
     # test copy with made-up alarms. Not saved.
@@ -68,7 +80,7 @@ if __name__ == "__main__":
     alarm("V61", 2, 20)
 
     test["state"] = classify_frame(test)
-    test_events = mark_setup(to_events(test))
+    test_events = mark_setup(to_events(test), setup_min_seconds=s["setup_min_seconds"])
 
     print("test copy: V60 alarms 5 and 15 min, V61 one of 20 min:")
-    print(mtbf_mttr(test_events).to_string())
+    print(mtbf_mttr(test_events, codes).to_string())

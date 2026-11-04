@@ -11,9 +11,8 @@ from matplotlib.patches import Patch
  
 from test_classification import classify_frame, NO_DATA
 from state_events import to_events, mark_setup
+from settings import load_settings
 
-ZONE = "Asia/Kolkata"
- 
 COLOURS = {
     "RUNNING": "#2E9E5B",   # green
     "IDLE": "#F2B134",      # amber
@@ -23,7 +22,7 @@ COLOURS = {
     NO_DATA: "#E9A6C6",     # pink
 }
 
-def draw_timeline(events, path, title="Machine timeline"):
+def draw_timeline(events, path, zone, title="Machine timeline"):
  
     machines = sorted(events["machine"].unique())
  
@@ -35,7 +34,7 @@ def draw_timeline(events, path, title="Machine timeline"):
  
         # start of each period, in IST, as numbers matplotlib understands
         starts = mdates.date2num(
-            mine["started_at"].dt.tz_convert(ZONE).dt.tz_localize(None).to_numpy()
+            mine["started_at"].dt.tz_convert(zone).dt.tz_localize(None).to_numpy()
         )
  
         # length of each period. matplotlib counts in days.
@@ -59,10 +58,10 @@ def draw_timeline(events, path, title="Machine timeline"):
     ax.xaxis.set_major_locator(mdates.HourLocator())
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
     ax.set_xlim(
-        mdates.date2num(events["started_at"].min().tz_convert(ZONE).tz_localize(None)),
+        mdates.date2num(events["started_at"].min().tz_convert(zone).tz_localize(None)),
         mdates.date2num(
             (events["started_at"] + pd.to_timedelta(events["duration_s"], unit="s"))
-            .max().tz_convert(ZONE).tz_localize(None)
+            .max().tz_convert(zone).tz_localize(None)
         ),
     )
     ax.grid(axis="x", color="white", linewidth=0.8, alpha=0.6)
@@ -89,14 +88,16 @@ def draw_timeline(events, path, title="Machine timeline"):
     return path
 
 if __name__ == "__main__":
+
+    s = load_settings("settings/example_client.json")
  
     df = pd.read_csv("data/cnc_sim_data.csv", low_memory=False)
  
     df["state"] = classify_frame(df)
  
-    events = mark_setup(to_events(df))
+    events = mark_setup(to_events(df), setup_min_seconds=s["setup_min_seconds"])
  
-    day = events["started_at"].min().tz_convert(ZONE).strftime("%d %b %Y")
-    saved = draw_timeline(events, "output/timeline.png", f"Machine timeline, {day} (IST)")
+    day = events["started_at"].min().tz_convert(s["timezone"]).strftime("%d %b %Y")
+    saved = draw_timeline(events, "output/timeline.png", s["timezone"], f"Machine timeline, {day} (IST)")
  
     print("saved:", saved)

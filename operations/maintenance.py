@@ -2,25 +2,13 @@
 
 import pandas as pd
 
-ZONE = "Asia/Kolkata"
-
-JOBS = [
-    {"job": "Way lube check", "every_h": 300},
-    {"job": "Spindle grease", "every_h": 500},
-    {"job": "Coolant change", "every_h": 800},
-]
-
-LAST_DONE = {
-    "V60": {"Way lube check": 400, "Spindle grease": 100, "Coolant change": 0},
-    "V61": {"Way lube check": 500, "Spindle grease": 100, "Coolant change": 300},
-    "V62": {"Way lube check": 200, "Spindle grease": 0},
-}
+from settings import load_settings
 
 # due soon when this share of the interval is left
 SOON_SHARE = 0.10
 
 
-def cutting_hours(df):
+def cutting_hours(df, zone):
 
     d = df.copy()
     d["timestamp"] = pd.to_datetime(d["timestamp"])
@@ -32,7 +20,7 @@ def cutting_hours(df):
         d["cutting_min"] = float("nan")
 
     # working days on file in IST
-    days = d["timestamp"].dt.tz_convert(ZONE).dt.date.nunique()
+    days = d["timestamp"].dt.tz_convert(zone).dt.date.nunique()
 
     rows = {}
     for machine, g in d.groupby("machine_code"):
@@ -52,7 +40,7 @@ def cutting_hours(df):
     return pd.DataFrame(rows).T.reindex(machines)
 
 
-def maintenance_due(hours, jobs=JOBS, last_done=LAST_DONE):
+def maintenance_due(hours, jobs, last_done):
 
     rows = []
 
@@ -100,13 +88,15 @@ def maintenance_due(hours, jobs=JOBS, last_done=LAST_DONE):
 
 if __name__ == "__main__":
 
+    s = load_settings("settings/example_client.json")
+
     df = pd.read_csv("data/cnc_sim_data.csv", low_memory=False)
 
-    hours = cutting_hours(df)
+    hours = cutting_hours(df, s["timezone"])
 
     print("cutting hours:")
     print(hours.round(1).to_string())
     print()
 
     print("service status:")
-    print(maintenance_due(hours).to_string(index=False))
+    print(maintenance_due(hours, s["maintenance_jobs"], s["last_done"]).to_string(index=False))

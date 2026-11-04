@@ -1,13 +1,12 @@
 # determine how much time the machine was actually running
 
-import pandas as pd 
+import pandas as pd
 
 from test_classification import classify_frame, RUNNING, IDLE, SETUP, ALARM, OFF, NO_DATA
 from state_events import to_events, mark_setup
+from settings import load_settings
 
-SETUP_IS_PLANNED = False
-
-def availability(events, setup_is_planned=SETUP_IS_PLANNED):
+def availability(events, setup_is_planned):
  
     # total seconds per machine
     seconds = (
@@ -39,16 +38,14 @@ def availability(events, setup_is_planned=SETUP_IS_PLANNED):
     return table
 
 if __name__ == "__main__":
- 
+
+    s = load_settings("settings/example_client.json")
+
     df = pd.read_csv("data/cnc_sim_data.csv", low_memory=False)
- 
+
     df["state"] = classify_frame(df)
- 
-    events = mark_setup(to_events(df))
- 
-    print("setup counts as a loss:")
-    print(availability(events, setup_is_planned=False).to_string())
-    print()
- 
-    print("setup is planned:")
-    print(availability(events, setup_is_planned=True).to_string())
+
+    events = mark_setup(to_events(df), setup_min_seconds=s["setup_min_seconds"])
+
+    print("from settings file, setup_is_planned =", s["setup_is_planned"])
+    print(availability(events, setup_is_planned=s["setup_is_planned"]).to_string())

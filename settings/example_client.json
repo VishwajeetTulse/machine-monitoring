@@ -1,0 +1,28 @@
+{
+    "client": "Example Client",
+    "timezone": "Asia/Kolkata",
+  
+    "shifts": [
+      {"name": "Shift 1", "start": "07:00", "end": "15:00"}
+    ],
+  
+    "setup_is_planned": false,
+    "setup_min_seconds": 300,
+    "gap_seconds": 5,
+  
+    "drift": {"window": 10, "watch_pct": 5, "act_pct": 10},
+  
+    "failure_alarm_codes": [],
+  
+    "maintenance_jobs": [
+      {"job": "Way lube check", "every_h": 300},
+      {"job": "Spindle grease", "every_h": 500},
+      {"job": "Coolant change", "every_h": 800}
+    ],
+  
+    "last_done": {
+      "V60": {"Way lube check": 400, "Spindle grease": 100, "Coolant change": 0},
+      "V61": {"Way lube check": 500, "Spindle grease": 100, "Coolant change": 300},
+      "V62": {"Way lube check": 200, "Spindle grease": 0}
+    }
+  }

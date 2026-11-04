@@ -5,10 +5,11 @@ import pandas as pd
 from test_classification import classify_frame
 from state_events import to_events, mark_setup
 from part_counting import to_parts
-from availability import availability, SETUP_IS_PLANNED
+from availability import availability
 from performance import performance
+from settings import load_settings
 
-def oee(events, parts, rejects=None, setup_is_planned=SETUP_IS_PLANNED):
+def oee(events, parts, setup_is_planned, rejects=None):
  
     a = availability(events, setup_is_planned)
     p = performance(events, parts)
@@ -76,20 +77,25 @@ def oee(events, parts, rejects=None, setup_is_planned=SETUP_IS_PLANNED):
     return out
 
 if __name__ == "__main__":
- 
+
+    s = load_settings("settings/example_client.json")
+    planned = s["setup_is_planned"]
+
     df = pd.read_csv("data/cnc_sim_data.csv", low_memory=False)
  
     df["state"] = classify_frame(df)
  
-    events = mark_setup(to_events(df))
+    events = mark_setup(to_events(df), setup_min_seconds=s["setup_min_seconds"])
     parts = to_parts(df)
  
-    print("no rejects entered, setup counts as a loss:")
-    print(oee(events, parts).to_string())
+    # the value from the settings file
+    print(f"no rejects entered, setup_is_planned = {planned} (settings file):")
+    print(oee(events, parts, setup_is_planned=planned).to_string())
     print()
  
-    print("no rejects entered, setup is planned:")
-    print(oee(events, parts, setup_is_planned=True).to_string())
+    # the other way, to compare
+    print(f"no rejects entered, setup_is_planned = {not planned}:")
+    print(oee(events, parts, setup_is_planned=not planned).to_string())
     print()
  
     example = pd.DataFrame({
@@ -97,4 +103,4 @@ if __name__ == "__main__":
         "rejects": [0, 6, 1],
     })
     print("example rejects (made up):")
-    print(oee(events, parts, rejects=example).to_string())
+    print(oee(events, parts, rejects=example, setup_is_planned=planned).to_string())

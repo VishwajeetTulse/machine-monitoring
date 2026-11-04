@@ -3,16 +3,10 @@
 import pandas as pd
 
 from part_counting import to_parts
-
-# average of this many latest parts
-WINDOW = 10
-
-# slower than ideal by this much (%)
-WATCH_PCT = 5
-ACT_PCT = 10
+from settings import load_settings
 
 
-def drift(parts):
+def drift(parts, window, watch_pct, act_pct):
 
     parts = parts.sort_values(["machine", "finished_at"]).reset_index(drop=True)
 
@@ -33,25 +27,25 @@ def drift(parts):
         }
 
         # not enough parts to judge
-        if n < WINDOW:
+        if n < window:
             row.update(start_pct=None, now_pct=None, crossed_watch_at=None,
                        crossed_act_at=None, status="TOO FEW PARTS")
             rows.append(row)
             continue
 
-        # average of the last WINDOW parts, at every part
-        avg = g["slower_pct"].rolling(WINDOW).mean().reset_index(drop=True)
+        # average of the last window parts, at every part
+        avg = g["slower_pct"].rolling(window).mean().reset_index(drop=True)
 
-        start = avg.iloc[WINDOW - 1]
+        start = avg.iloc[window - 1]
         now = avg.iloc[-1]
 
         # first part number where the average passed each limit
-        watch_at = avg[avg >= WATCH_PCT].index.min()
-        act_at = avg[avg >= ACT_PCT].index.min()
+        watch_at = avg[avg >= watch_pct].index.min()
+        act_at = avg[avg >= act_pct].index.min()
 
-        if now >= ACT_PCT:
+        if now >= act_pct:
             status = "ACT"
-        elif now >= WATCH_PCT:
+        elif now >= watch_pct:
             status = "WATCH"
         else:
             status = "OK"
@@ -71,12 +65,15 @@ def drift(parts):
 
 if __name__ == "__main__":
 
+    s = load_settings("settings/example_client.json")
+    d = s["drift"]
+
     df = pd.read_csv("data/cnc_sim_data.csv", low_memory=False)
 
     parts = to_parts(df)
 
-    table = drift(parts)
+    table = drift(parts, d["window"], d["watch_pct"], d["act_pct"])
 
-    print(f"average of last {WINDOW} parts. watch at {WATCH_PCT}%, act at {ACT_PCT}%")
+    print(f"average of last {d['window']} parts. watch at {d['watch_pct']}%, act at {d['act_pct']}%")
     print()
     print(table.drop(columns="started_at").to_string(index=False))

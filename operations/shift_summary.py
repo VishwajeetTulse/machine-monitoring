@@ -10,22 +10,17 @@ from part_counting import to_parts
 from downtime import downtime_by_reason
 from availability import availability
 from oee import oee
-
-ZONE = "Asia/Kolkata"
-
-SHIFTS = [
-    {"name": "Shift 1", "start": "07:00", "end": "15:00"},
-]
+from settings import load_settings
 
 def clock(text):
    
     hours, minutes = text.split(":")
     return pd.Timedelta(hours=int(hours), minutes=int(minutes))
 
-def shift_windows(events, shifts):
+def shift_windows(events, shifts, zone):
     # first and last day in the data in IST
-    first = events["started_at"].min().tz_convert(ZONE).normalize()
-    last = events["ended_at"].max().tz_convert(ZONE).normalize()
+    first = events["started_at"].min().tz_convert(zone).normalize()
+    last = events["ended_at"].max().tz_convert(zone).normalize()
 
     windows = []
 
@@ -71,11 +66,11 @@ def number(x, digits=1):
     return None if pd.isna(x) else round(float(x), digits)
  
  
-def summarise(events, parts, shifts=SHIFTS):
+def summarise(events, parts, shifts, setup_is_planned, zone):
  
     blocks = []
  
-    for name, start, end in shift_windows(events, shifts):
+    for name, start, end in shift_windows(events, shifts, zone):
  
         ev = cut_events(events, start, end)
         if ev.empty:
@@ -83,8 +78,8 @@ def summarise(events, parts, shifts=SHIFTS):
         pt = cut_parts(parts, start, end)
  
         # reuse operations 5 and 8 on this shift only
-        a = availability(ev)
-        o = oee(ev, pt)
+        a = availability(ev, setup_is_planned)
+        o = oee(ev, pt, setup_is_planned=setup_is_planned)
         made = pt.groupby("machine")["parts_added"].sum()
  
         for m in sorted(ev["machine"].unique()):
@@ -103,7 +98,7 @@ def summarise(events, parts, shifts=SHIFTS):
                 longest = {
                     "reason": big["reason"] if pd.notna(big["reason"]) else "UNKNOWN",
                     "minutes": round(big["duration_s"] / 60, 1),
-                    "started_ist": big["started_at"].tz_convert(ZONE).strftime("%H:%M"),
+                    "started_ist": big["started_at"].tz_convert(zone).strftime("%H:%M"),
                 }
  
             notes = [n for n in row["note"].split("; ") if n]
@@ -111,8 +106,8 @@ def summarise(events, parts, shifts=SHIFTS):
             blocks.append({
                 "machine": m,
                 "shift": name,
-                "date": start.tz_convert(ZONE).strftime("%Y-%m-%d"),
-                "window": f"{start.tz_convert(ZONE):%H:%M}-{end.tz_convert(ZONE):%H:%M}",
+                "date": start.tz_convert(zone).strftime("%Y-%m-%d"),
+                "window": f"{start.tz_convert(zone):%H:%M}-{end.tz_convert(zone):%H:%M}",
                 "parts": int(made.get(m, 0)),
                 "run_min": number(a.loc[m, "run_s"] / 60),
                 "planned_min": number(a.loc[m, "planned_s"] / 60),
@@ -133,15 +128,17 @@ def summarise(events, parts, shifts=SHIFTS):
     return blocks
 
 if __name__ == "__main__":
+
+    s = load_settings("settings/example_client.json")
  
     df = pd.read_csv("data/cnc_sim_data.csv", low_memory=False)
  
     df["state"] = classify_frame(df)
  
-    events = mark_setup(to_events(df))
+    events = mark_setup(to_events(df), setup_min_seconds=s["setup_min_seconds"])
     parts = to_parts(df)
  
-    blocks = summarise(events, parts)
+    blocks = summarise(events, parts, s["shifts"], s["setup_is_planned"], s["timezone"])
  
     cols = ["machine", "shift", "parts", "availability_pct", "performance_pct",
             "oee_pct", "stops", "downtime_min"]

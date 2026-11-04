@@ -3,9 +3,7 @@
 
 import pandas as pd
 from test_classification import classify_frame, IDLE, SETUP, OFF
-
-# must be at least 5 mins
-SETUP_MIN_SECONDS = 300
+from settings import load_settings
 
 def to_events(df):
     df = df.copy()
@@ -34,6 +32,7 @@ def to_events(df):
             program_number=("program_number", "first"),
             parts_at_end=("parts_today", "last"),
             reason=("downtime_reason", "first"),
+            alarm_code=("alarm_code", "first"),
         )
 
         .reset_index(drop=True)
@@ -45,7 +44,7 @@ def to_events(df):
  
     return events
 
-def mark_setup(events):
+def mark_setup(events, setup_min_seconds):
  
     events = events.copy()
  
@@ -53,11 +52,13 @@ def mark_setup(events):
     prev_state = events.groupby("machine")["state"].shift()
     prev_program = events.groupby("machine")["program_number"].shift()
  
-    # & = and. all four must be true.
+    # & = and. all must be true.
     is_setup = (
         (events["state"] == IDLE)                          # called IDLE now
-        & (events["duration_s"] >= SETUP_MIN_SECONDS)      # long stop
+        & (events["duration_s"] >= setup_min_seconds)      # long stop
         & (events["program_number"] != prev_program)       # program changed
+        & events["program_number"].notna()                 # program known
+        & prev_program.notna()                             # program known
         & (prev_state != OFF)                              # not after lunch
     )
  
@@ -66,6 +67,8 @@ def mark_setup(events):
     return events
 
 if __name__ == "__main__":
+
+    s = load_settings("settings/example_client.json")
  
     df = pd.read_csv("data/cnc_sim_data.csv", low_memory=False)
  
@@ -74,7 +77,7 @@ if __name__ == "__main__":
     # from operation 1
     df["state"] = classify_frame(df)
  
-    events = mark_setup(to_events(df))
+    events = mark_setup(to_events(df), setup_min_seconds=s["setup_min_seconds"])
  
     print(f"readings in : {len(df):,}")
     print(f"events out  : {len(events):,}")
