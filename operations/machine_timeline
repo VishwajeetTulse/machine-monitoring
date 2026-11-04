@@ -1,0 +1,101 @@
+from pathlib import Path
+ 
+import matplotlib
+ 
+matplotlib.use("Agg")
+ 
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
+import pandas as pd
+from matplotlib.patches import Patch
+ 
+from test_classification import classify_frame
+from state_events import to_events, mark_setup
+
+ZONE = "Asia/Kolkata"
+ 
+COLOURS = {
+    "RUNNING": "#2E9E5B",   # green
+    "IDLE": "#F2B134",      # amber
+    "SETUP": "#3D7EDB",     # blue
+    "ALARM": "#D64545",     # red
+    "OFF": "#B5B5B5",       # grey
+}
+
+def draw_timeline(events, path, title="Machine timeline"):
+ 
+    machines = sorted(events["machine"].unique())
+ 
+    # taller picture when there are more machines
+    fig, ax = plt.subplots(figsize=(12, 1.4 + 0.9 * len(machines)))
+ 
+    for row, m in enumerate(machines):
+        mine = events[events["machine"] == m]
+ 
+        # start of each period, in IST, as numbers matplotlib understands
+        starts = mdates.date2num(
+            mine["started_at"].dt.tz_convert(ZONE).dt.tz_localize(None).to_numpy()
+        )
+ 
+        # length of each period. matplotlib counts in days.
+        widths = mine["duration_s"].to_numpy() / 86400
+ 
+        # one rectangle per period. Rectangle = (start, length).
+        # (row * 10, 8) = how far down it sits, and how tall it is.
+        ax.broken_barh(
+            list(zip(starts, widths)),
+            (row * 10, 8),
+            facecolors=[COLOURS[s] for s in mine["state"]],
+        )
+ 
+    # machine names on the left, first machine at the top
+    ax.set_yticks([r * 10 + 4 for r in range(len(machines))])
+    ax.set_yticklabels(machines)
+    ax.set_ylim(len(machines) * 10, -2)
+ 
+    # hours along the bottom
+    ax.xaxis_date()
+    ax.xaxis.set_major_locator(mdates.HourLocator())
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+    ax.set_xlim(
+        mdates.date2num(events["started_at"].min().tz_convert(ZONE).tz_localize(None)),
+        mdates.date2num(
+            (events["started_at"] + pd.to_timedelta(events["duration_s"], unit="s"))
+            .max().tz_convert(ZONE).tz_localize(None)
+        ),
+    )
+    ax.grid(axis="x", color="white", linewidth=0.8, alpha=0.6)
+    ax.set_title(title, loc="left")
+ 
+    # legend: only the states that appear
+    present = [s for s in COLOURS if s in set(events["state"])]
+    ax.legend(
+        handles=[Patch(color=COLOURS[s], label=s) for s in present],
+        loc="upper center", bbox_to_anchor=(0.5, -0.12),
+        ncol=len(present), frameon=False,
+    )
+ 
+    for side in ("top", "right", "left"):
+        ax.spines[side].set_visible(False)
+ 
+    fig.tight_layout()
+ 
+    # make the folder if it is missing
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+ 
+    return path
+
+if __name__ == "__main__":
+ 
+    df = pd.read_csv("data/cnc_sim_data.csv", low_memory=False)
+ 
+    df["state"] = classify_frame(df)
+ 
+    events = mark_setup(to_events(df))
+ 
+    day = events["started_at"].min().tz_convert(ZONE).strftime("%d %b %Y")
+    saved = draw_timeline(events, "output/timeline.png", f"Machine timeline, {day} (IST)")
+ 
+    print("saved:", saved)
