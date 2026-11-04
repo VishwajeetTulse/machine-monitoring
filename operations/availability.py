@@ -2,7 +2,7 @@
 
 import pandas as pd 
 
-from test_classification import classify_frame, RUNNING, IDLE, SETUP, ALARM, OFF
+from test_classification import classify_frame, RUNNING, IDLE, SETUP, ALARM, OFF, NO_DATA
 from state_events import to_events, mark_setup
 
 SETUP_IS_PLANNED = False
@@ -16,13 +16,14 @@ def availability(events, setup_is_planned=SETUP_IS_PLANNED):
         .unstack(fill_value=0)
     )
  
-    # all five states exist
-    seconds = seconds.reindex(columns=[RUNNING, IDLE, SETUP, ALARM, OFF], fill_value=0)
+    # all states exist
+    seconds = seconds.reindex(columns=[RUNNING, IDLE, SETUP, ALARM, OFF, NO_DATA], fill_value=0)
 
     table = pd.DataFrame(index=seconds.index)
     table["run_s"] = seconds[RUNNING]
 
-    planned = seconds.sum(axis=1) - seconds[OFF]
+    # lunch and missing data are not planned time
+    planned = seconds.sum(axis=1) - seconds[OFF] - seconds[NO_DATA]
 
     if setup_is_planned:
         planned = planned - seconds[SETUP]

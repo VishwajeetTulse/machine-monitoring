@@ -7,6 +7,7 @@ IDLE = "IDLE"
 SETUP = "SETUP"
 ALARM = "ALARM"
 OFF = "OFF"
+NO_DATA = "NO_DATA"
 
 def classify(row):
     if row["alarm_code"] != 0:

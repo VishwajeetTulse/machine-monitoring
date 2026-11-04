@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib.patches import Patch
  
-from test_classification import classify_frame
+from test_classification import classify_frame, NO_DATA
 from state_events import to_events, mark_setup
 
 ZONE = "Asia/Kolkata"
@@ -20,6 +20,7 @@ COLOURS = {
     "SETUP": "#3D7EDB",     # blue
     "ALARM": "#D64545",     # red
     "OFF": "#B5B5B5",       # grey
+    NO_DATA: "#E9A6C6",     # pink
 }
 
 def draw_timeline(events, path, title="Machine timeline"):

@@ -22,9 +22,16 @@ def to_parts(df):
 
     # if counter went to 0
     reset_after_cycle = (change < 0) & was_running & (df["mode"] != "OFF")
+
+    # reset row has the next program's values
+    # take program and ideal from the row above
+    for col in ["program_number", "ideal_cycle_ms"]:
+        df[col] = df[col].where(~reset_after_cycle, by_machine[col].shift())
+
     finished = df[counter_up | reset_after_cycle].copy()
 
-    finished["parts_added"] = change.where(counter_up, 1)
+    # .loc keeps only finished rows
+    finished["parts_added"] = change.where(counter_up, 1).loc[finished.index]
 
     parts = pd.DataFrame({
         "machine": finished["machine_code"],
