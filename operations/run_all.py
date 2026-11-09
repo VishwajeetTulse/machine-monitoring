@@ -33,6 +33,12 @@ LIVE_DB = "output/live.db"
 # MTBF and the maintenance rate need more than one day
 HISTORY_DAYS = 30
 
+SHIFT_COLUMNS = [
+    "machine", "shift", "date", "window", "parts", "run_min", "planned_min", "availability_pct",
+    "performance_pct", "quality_pct", "oee_pct", "stops", "downtime_min", "top_reasons",
+    "longest_stop", "notes",
+]
+
 
 class NoReadings(ValueError):
     pass
@@ -100,7 +106,8 @@ def calculate(df, s, rejects=None, window=None, day=None):
 
     # op9: JSON parts are saved as text
     blocks = summarise(events, parts, s["shifts"], planned, s["timezone"])
-    shift_table = pd.DataFrame(blocks)
+    # readings that touch no shift give no blocks, and that is not an error
+    shift_table = pd.DataFrame(blocks, columns=SHIFT_COLUMNS)
     for col in ["top_reasons", "longest_stop", "notes"]:
         shift_table[col] = shift_table[col].apply(json.dumps)
 

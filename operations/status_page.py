@@ -258,6 +258,7 @@ PAGE = """<!doctype html>
   .board-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
   .board-top .left { display: flex; align-items: center; gap: 9px; font-size: 14px; }
   .board-top .left i { width: 7px; height: 7px; border-radius: 50%; background: var(--green); font-style: normal; }
+  .board-top .left.stale i { background: var(--orange); }
   .tag { background: var(--panel-2); color: var(--panel-muted); font-size: 12px; font-weight: 600;
          border-radius: 999px; padding: 6px 12px; }
 
@@ -407,6 +408,7 @@ function draw(d) {
   var stale = d.no_data_since;
   document.getElementById("time").textContent = stale ? "No data since " + stale : (d.time ? "Live " + d.time : "waiting for data");
   document.getElementById("livebar").className = stale ? "live stale" : "live";
+  document.querySelector(".board-top .left").className = stale ? "left stale" : "left";
   document.getElementById("boardtime").innerHTML = stale ? "No data since " + stale : (d.time ? "Live board &middot; " + d.time : "Live board");
   document.getElementById("count").textContent = d.machines.length + " machines";
 

@@ -106,7 +106,8 @@ def maintenance_due(hours, jobs, last_done):
             )
             rows.append(row)
 
-    return pd.DataFrame(rows)
+    # always the same columns, even for a client with no maintenance jobs
+    return pd.DataFrame(rows, columns=["machine", "job", "every_h", "used_h", "left_h", "days_left", "status"])
 
 
 if __name__ == "__main__":

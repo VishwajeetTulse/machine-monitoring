@@ -194,6 +194,19 @@ def test_a_report_is_written_only_once(shop, monkeypatch):
     assert shift_report.check(shop["settings"], now=after) == []
 
 
+def test_readings_outside_every_shift_are_not_an_error(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    settings = {"client": "T", "setup_is_planned": False,
+                "shifts": [{"name": "S", "start": "20:00", "end": "21:00", "breaks": []}]}
+    path = tmp_path / "client.json"
+    path.write_text(json.dumps(settings))
+    csv = tmp_path / "day.csv"
+    two_parts(MON).to_csv(csv, index=False)
+    tables = run_all.run(str(path), str(csv))
+    assert tables["shift_summary"].empty
+    assert int(tables["parts"]["parts_added"].sum()) == 2
+
+
 def test_live_mtbf_numbers_stay_numeric(shop, monkeypatch):
     fill(two_parts(MON))
     freeze(monkeypatch, MON + pd.Timedelta(minutes=3))
