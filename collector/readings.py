@@ -1,7 +1,9 @@
 # the readings table: one row = one second of one machine
 # same table the replay fills, so everything else keeps working
 
+import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 # column name -> type. Fixed, so an empty first batch cannot confuse the table.
@@ -64,8 +66,35 @@ def open_db(path):
     cols = ", ".join(f'"{c}" {t}' for c, t in COLUMNS.items())
     con.execute(f"CREATE TABLE IF NOT EXISTS readings ({cols})")
     con.execute("CREATE INDEX IF NOT EXISTS idx_readings ON readings (machine_code, timestamp)")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_readings_time ON readings (timestamp)")
+
+    # the collector's own pulse: was the box running, and could it reach the network?
+    con.execute("CREATE TABLE IF NOT EXISTS heartbeat (timestamp TEXT, network_ok INTEGER)")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_heartbeat ON heartbeat (timestamp)")
+
+    # which machines belong to this shop, even on a day one of them never answers
+    con.execute("CREATE TABLE IF NOT EXISTS machines (code TEXT PRIMARY KEY, capabilities TEXT)")
+
+    # real readings follow the real clock. The replay says otherwise.
+    con.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
+    con.execute("INSERT OR REPLACE INTO meta VALUES ('clock', 'real')")
     con.commit()
     return con
+
+
+def register_machines(con, machines):
+    con.execute("DELETE FROM machines")
+    con.executemany(
+        "INSERT INTO machines VALUES (?, ?)",
+        [(m["code"], json.dumps(m.get("capabilities", {}))) for m in machines],
+    )
+    con.commit()
+
+
+def write_heartbeat(con, network_ok, when=None):
+    when = when or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    con.execute("INSERT INTO heartbeat VALUES (?, ?)", (when, 1 if network_ok else 0))
+    con.commit()
 
 
 def write(con, rows):
