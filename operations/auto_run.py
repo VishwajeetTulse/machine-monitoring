@@ -5,6 +5,7 @@ import time
 from datetime import datetime
 
 import alerts
+import shift_report
 from run_all import run
 from settings import load_settings
 
@@ -25,13 +26,14 @@ if __name__ == "__main__":
     p.add_argument("--source", choices=["csv", "live"], default="live")
     p.add_argument("--every", type=float, default=10, help="seconds between runs")
     p.add_argument("--times", type=int, default=0, help="stop after this many runs (0 = never)")
-    p.add_argument("--fresh", action="store_true", help="delete old alerts before starting")
+    p.add_argument("--fresh", action="store_true", help="delete old alerts and shift reports before starting")
     a = p.parse_args()
 
     settings = load_settings(a.settings)
 
     if a.fresh:
         alerts.reset()
+        shift_report.reset()
 
     print(f"running every {a.every:g} seconds from the {a.source} source. Ctrl+C to stop.")
 
@@ -50,6 +52,10 @@ if __name__ == "__main__":
                         print(f"          ALERT    {c['rule']:<12}{c['message']}")
                     for c in cleared:
                         print(f"          cleared  {c['rule']:<12}{c['message']}")
+
+                # a finished shift gets its report once
+                for w in shift_report.check(settings):
+                    print(f"          REPORT   {w['shift']} {w['date']} saved to {w['file']}")
             except Exception as e:
                 # keep going. A bad moment must not stop the loop.
                 print(f"{now}  not saved: {type(e).__name__}: {e}")
