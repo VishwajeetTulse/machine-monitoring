@@ -1,12 +1,14 @@
 # live status page: shows every machine, today's numbers and open alerts
-# it only reads the two databases, it never writes to them
+# the operator can also tap the reason of a stop on the machine card
+# it reads the two databases. The only thing it writes is the reasons table.
 
 import argparse
 import sqlite3
 
 import pandas as pd
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 
+import reasons
 from settings import load_settings
 
 RESULTS_DB = "output/results.db"
@@ -51,7 +53,8 @@ def build():
     parts = read(RESULTS_DB, "SELECT machine, SUM(parts_added) AS parts FROM parts GROUP BY machine")
     alerts = read(RESULTS_DB, "SELECT * FROM alerts")
 
-    out = {"client": SETTINGS["client"], "time": "", "machines": [], "shop": None, "open": [], "recent": []}
+    out = {"client": SETTINGS["client"], "time": "", "machines": [], "shop": None,
+           "open": [], "recent": [], "choices": SETTINGS["stop_reasons"]}
     if last.empty:
         return out
 
@@ -66,6 +69,9 @@ def build():
     oee_rows = {r["machine"]: r for _, r in oee.iterrows()} if not oee.empty else {}
     parts_by = dict(zip(parts["machine"], parts["parts"])) if not parts.empty else {}
 
+    taps = reasons.load(LIVE_DB)
+    taps["at"] = pd.to_datetime(taps["at"], utc=True)
+
     for _, row in last.sort_values("machine").iterrows():
         m = row["machine"]
         silent = (now - row["last"]).total_seconds() / 60 >= silent_min
@@ -75,10 +81,20 @@ def build():
         if e is not None:
             since = (now - pd.to_datetime(e["started_at"], utc=True)).total_seconds() / 60
         o = oee_rows.get(m)
+
+        reason = None if e is None or pd.isna(e["reason"]) else e["reason"]
+        # a tap made since this stop began shows at once, before the next calculation
+        if e is not None:
+            mine = taps[(taps["machine"] == m) & (taps["at"] >= pd.to_datetime(e["started_at"], utc=True))]
+            if not mine.empty:
+                reason = mine.iloc[-1]["reason"]
+
         out["machines"].append({
             "machine": m,
             "state": state,
-            "reason": None if e is None or pd.isna(e["reason"]) else e["reason"],
+            "can_pick": state in reasons.STOP_STATES,
+            "stop_at": None if e is None else e["ended_at"],
+            "reason": reason,
             "program": None if e is None or pd.isna(e["program_number"]) else int(e["program_number"]),
             "since_min": number(since, 0) if not silent else number((now - row["last"]).total_seconds() / 60, 0),
             "last_reading": local(row["last"].isoformat(), zone),
@@ -116,6 +132,25 @@ def api_status():
     return jsonify(build())
 
 
+@app.route("/api/reason", methods=["POST"])
+def api_reason():
+    body = request.get_json(silent=True) or {}
+    machine = body.get("machine")
+    reason = body.get("reason")
+
+    if reason not in SETTINGS["stop_reasons"]:
+        return jsonify({"error": "unknown reason"}), 400
+
+    # only a machine that is stopped right now can be given a reason
+    current = {m["machine"]: m for m in build()["machines"]}
+    if machine not in current or not current[machine]["can_pick"]:
+        return jsonify({"error": "machine is not stopped"}), 400
+
+    # the tap belongs to the stop the operator sees, so it is stamped inside that stop
+    reasons.add_reason(machine, current[machine]["stop_at"], reason, LIVE_DB)
+    return jsonify({"ok": True})
+
+
 @app.route("/")
 def home():
     return PAGE
@@ -151,6 +186,14 @@ PAGE = """<!doctype html>
   td, th { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e6e9ee; font-size: 14px; }
   th { background: #e9edf2; }
   .none { color: #667; font-size: 14px; }
+  .stop { background: #fff; border-radius: 6px; padding: 10px 14px; margin-bottom: 8px;
+          display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .stop .who { min-width: 150px; }
+  .stop .who b { font-size: 16px; }
+  .stop .who span { display: block; font-size: 12px; color: #667; }
+  .stop button { border: 1px solid #b9c2cc; background: #fff; border-radius: 14px; padding: 6px 12px;
+                 margin: 2px 4px 2px 0; font-size: 13px; cursor: pointer; }
+  .stop button.on { background: #1d2733; color: #fff; border-color: #1d2733; }
 </style>
 </head>
 <body>
@@ -159,6 +202,8 @@ PAGE = """<!doctype html>
   <div class="shop" id="shop"></div>
   <h2>Machines</h2>
   <div class="cards" id="cards"></div>
+  <h2>Stopped now: tap the reason</h2>
+  <div id="stops"></div>
   <h2>Open alerts</h2>
   <div id="open"></div>
   <h2>Recently cleared</h2>
@@ -176,6 +221,31 @@ function table(rows, cleared) {
   });
   return h + "</table>";
 }
+
+function stops(d) {
+  var h = "";
+  d.machines.forEach(function (m) {
+    if (!m.can_pick) return;
+    h += '<div class="stop"><div class="who"><b>' + m.machine + '</b><span>' + m.state +
+         ' for ' + show(m.since_min, " min") + '</span></div><div>';
+    d.choices.forEach(function (c) {
+      h += '<button data-machine="' + m.machine + '" data-reason="' + c + '"' +
+           (c === m.reason ? ' class="on"' : '') + '>' + c.replace(/_/g, " ") + '</button>';
+    });
+    h += "</div></div>";
+  });
+  return h || '<div class="none">no machine is stopped</div>';
+}
+
+document.addEventListener("click", function (ev) {
+  var b = ev.target.closest("button[data-reason]");
+  if (!b) return;
+  fetch("/api/reason", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({machine: b.dataset.machine, reason: b.dataset.reason})
+  }).then(load);
+});
 
 function draw(d) {
   document.getElementById("client").textContent = d.client + " - machine status";
@@ -202,6 +272,7 @@ function draw(d) {
   });
   document.getElementById("cards").innerHTML = c || '<div class="none">no data yet</div>';
 
+  document.getElementById("stops").innerHTML = stops(d);
   document.getElementById("open").innerHTML = table(d.open, false);
   document.getElementById("recent").innerHTML = table(d.recent, true);
 }

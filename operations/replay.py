@@ -1,4 +1,5 @@
-# plays the simulator CSV into a database one second at a time
+# plays the simulator CSV into a database, one second at a time
+# stands in for a real collector. A real one writes the same readings table.
 
 import argparse
 import sqlite3
@@ -94,6 +95,8 @@ def replay(data_path, db_path, speed, keep=False, alarms=(), silents=()):
             print(f"keeping old readings, carrying on after {stop}")
     else:
         con.execute("DROP TABLE IF EXISTS readings")
+        # new readings, so old operator taps no longer belong to them
+        con.execute("DROP TABLE IF EXISTS reasons")
         con.commit()
 
     create_table(con, df)

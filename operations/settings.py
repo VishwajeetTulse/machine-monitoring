@@ -13,6 +13,8 @@ DEFAULTS = {
     "failure_alarm_codes": [],   # empty = every alarm counts
     "maintenance_jobs": [],
     "last_done": {},
+    "stop_reasons": ["LOADING", "NO_MATERIAL", "TOOL_CHANGE", "NO_OPERATOR",
+                     "QUALITY_CHECK", "SETUP", "MAINTENANCE", "OTHER"],
     "alerts": {
         "alarm_minutes": 5,
         "idle_minutes": 15,
@@ -68,6 +70,12 @@ def check(s):
 
     if s["setup_min_seconds"] <= 0 or s["gap_seconds"] <= 0:
         raise ValueError("setup_min_seconds and gap_seconds must be above 0")
+
+    reasons = s["stop_reasons"]
+    if not reasons or not all(isinstance(r, str) and r.strip() for r in reasons):
+        raise ValueError("stop_reasons must be a list of names")
+    if len(set(reasons)) != len(reasons):
+        raise ValueError("stop_reasons has a name twice")
 
     d = s["drift"]
     if d["window"] < 2 or not (0 < d["watch_pct"] < d["act_pct"]):

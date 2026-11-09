@@ -19,6 +19,7 @@ from cycle_drift import drift
 from mtbf_mttr import mtbf_mttr
 from maintenance import cutting_hours, maintenance_due
 from quality import load_rejects
+import reasons as stop_reasons
 from store import save_tables, add_log, query
 
 DB = "output/results.db"
@@ -50,6 +51,10 @@ def run(settings_path, data_path, rejects_path=None, source="csv"):
         to_events(fill_gaps(df, s["gap_seconds"])),
         setup_min_seconds=s["setup_min_seconds"],
     )
+
+    # reasons tapped by the operator replace the reason in the data (live only)
+    if source == "live":
+        events = stop_reasons.apply_reasons(events, stop_reasons.load(LIVE_DB))
 
     # op3: parts come from the raw readings
     parts = to_parts(df)
@@ -132,7 +137,7 @@ if __name__ == "__main__":
         print(f"  {name:<14}{len(t):>6}")
     print()
 
-    # read back from the database not from memory
+    # read back from the database, not from memory
     print("read back from the database:")
     print("  parts :", int(query(DB, "SELECT SUM(parts_added) AS n FROM parts")["n"][0]))
     print("  events:", int(query(DB, "SELECT COUNT(*) AS n FROM events")["n"][0]))
