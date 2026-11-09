@@ -8,6 +8,15 @@ lib/
 # generated data
 data/*.parquet
 
+# generated results and live database
+output/
+*.db
+*.db-wal
+*.db-shm
+
+# real client settings (keep private)
+settings/clients/
+
 # python
 __pycache__/
 *.pyc

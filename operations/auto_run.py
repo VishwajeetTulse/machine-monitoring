@@ -1,11 +1,12 @@
-# runs the whole system again and again
+# runs the whole system again and again, so nobody has to type commands
 
 import argparse
 import time
 from datetime import datetime
 
-from run_all import run, DB
-from store import query
+import alerts
+from run_all import run
+from settings import load_settings
 
 
 def one_line(tables):
@@ -24,7 +25,13 @@ if __name__ == "__main__":
     p.add_argument("--source", choices=["csv", "live"], default="live")
     p.add_argument("--every", type=float, default=10, help="seconds between runs")
     p.add_argument("--times", type=int, default=0, help="stop after this many runs (0 = never)")
+    p.add_argument("--fresh", action="store_true", help="delete old alerts before starting")
     a = p.parse_args()
+
+    settings = load_settings(a.settings)
+
+    if a.fresh:
+        alerts.reset()
 
     print(f"running every {a.every:g} seconds from the {a.source} source. Ctrl+C to stop.")
 
@@ -35,7 +42,16 @@ if __name__ == "__main__":
             try:
                 tables = run(a.settings, a.data, a.rejects, a.source)
                 print(f"{now}  {one_line(tables)}")
+
+                # alerts only make sense on live readings
+                if a.source == "live":
+                    opened, cleared = alerts.check(settings)
+                    for c in opened:
+                        print(f"          ALERT    {c['rule']:<12}{c['message']}")
+                    for c in cleared:
+                        print(f"          cleared  {c['rule']:<12}{c['message']}")
             except Exception as e:
+                # keep going. A bad moment must not stop the loop.
                 print(f"{now}  not saved: {type(e).__name__}: {e}")
 
             count += 1

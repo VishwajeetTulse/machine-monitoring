@@ -1,5 +1,4 @@
-# plays the simulator CSV into a database, one second at a time
-# stands in for a real collector. A real one writes the same readings table.
+# plays the simulator CSV into a database one second at a time
 
 import argparse
 import sqlite3
@@ -12,7 +11,41 @@ import pandas as pd
 HIDDEN = ["state"]
 
 
-def load_csv(path):
+def parse_fault(spec, name):
+    # "V60,10:00,8" -> machine, start (IST clock), minutes
+    try:
+        machine, start, minutes = spec.split(",")
+        hours, mins = start.split(":")
+        return machine.strip(), int(hours), int(mins), float(minutes)
+    except ValueError:
+        raise SystemExit(f"--{name} needs: MACHINE,HH:MM,MINUTES   example: --{name} V60,10:00,8")
+
+
+def apply_faults(df, alarms, silents, zone="Asia/Kolkata"):
+    # test faults, so alerts can be tried. They change the data on purpose.
+    day = df["_t"].iloc[0].tz_convert(zone).normalize()
+
+    def window(spec, name):
+        machine, hours, mins, length = parse_fault(spec, name)
+        if machine not in set(df["machine_code"]):
+            raise SystemExit(f"--{name}: no machine called {machine}")
+        begin = (day + pd.Timedelta(hours=hours, minutes=mins)).tz_convert("UTC")
+        mask = (df["machine_code"] == machine) & (df["_t"] >= begin) & (df["_t"] < begin + pd.Timedelta(minutes=length))
+        return mask
+
+    for spec in alarms:
+        mask = window(spec, "alarm")
+        df.loc[mask, "alarm_code"] = 1234
+        df.loc[mask, "execution"] = "STOPPED"
+
+    for spec in silents:
+        # these readings are never sent
+        df = df[~window(spec, "silent")]
+
+    return df.reset_index(drop=True)
+
+
+def load_csv(path, alarms=(), silents=()):
     df = pd.read_csv(path, low_memory=False)
 
     # drop the simulator's answers, so the system must work them out
@@ -20,7 +53,8 @@ def load_csv(path):
     df = df.drop(columns=drop)
 
     df["_t"] = pd.to_datetime(df["timestamp"])
-    return df.sort_values("_t", kind="stable").reset_index(drop=True)
+    df = df.sort_values("_t", kind="stable").reset_index(drop=True)
+    return apply_faults(df, alarms, silents)
 
 
 def create_table(con, df):
@@ -39,9 +73,9 @@ def last_stored(con):
     return pd.to_datetime(row[0]) if row and row[0] else None
 
 
-def replay(data_path, db_path, speed, keep=False):
+def replay(data_path, db_path, speed, keep=False, alarms=(), silents=()):
 
-    df = load_csv(data_path)
+    df = load_csv(data_path, alarms, silents)
 
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(db_path)
@@ -63,6 +97,11 @@ def replay(data_path, db_path, speed, keep=False):
         con.commit()
 
     create_table(con, df)
+
+    for spec in alarms:
+        print(f"test fault: alarm {spec}")
+    for spec in silents:
+        print(f"test fault: silent {spec}")
 
     total = len(df)
     print(f"playing {total:,} readings at {speed}x. Ctrl+C to stop.")
@@ -103,9 +142,11 @@ if __name__ == "__main__":
     p.add_argument("--db", default="output/live.db")
     p.add_argument("--speed", type=float, default=600, help="simulated seconds per real second")
     p.add_argument("--keep", action="store_true", help="carry on after the stored readings")
+    p.add_argument("--alarm", action="append", default=[], help="test fault MACHINE,HH:MM,MINUTES (IST)")
+    p.add_argument("--silent", action="append", default=[], help="test fault MACHINE,HH:MM,MINUTES (IST)")
     a = p.parse_args()
 
     try:
-        replay(a.data, a.db, a.speed, a.keep)
+        replay(a.data, a.db, a.speed, a.keep, a.alarm, a.silent)
     except KeyboardInterrupt:
         print("stopped")

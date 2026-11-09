@@ -13,6 +13,13 @@ DEFAULTS = {
     "failure_alarm_codes": [],   # empty = every alarm counts
     "maintenance_jobs": [],
     "last_done": {},
+    "alerts": {
+        "alarm_minutes": 5,
+        "idle_minutes": 15,
+        "silent_minutes": 2,
+        "drift_levels": ["ACT"],
+        "maintenance_levels": ["OVERDUE", "DUE SOON"],
+    },
 }
 
 # no default. It changes the OEE number, so the file must say it
@@ -37,6 +44,7 @@ def load_settings(path):
     # file values on top of the defaults
     s = {**DEFAULTS, **given}
     s["drift"] = {**DEFAULTS["drift"], **given.get("drift", {})}
+    s["alerts"] = {**DEFAULTS["alerts"], **given.get("alerts", {})}
 
     check(s)
     return s
@@ -64,6 +72,18 @@ def check(s):
     d = s["drift"]
     if d["window"] < 2 or not (0 < d["watch_pct"] < d["act_pct"]):
         raise ValueError("drift: window 2 or more, and 0 < watch_pct < act_pct")
+
+    al = s["alerts"]
+    unknown = set(al) - set(DEFAULTS["alerts"])
+    if unknown:
+        raise ValueError(f"unknown alert setting(s): {sorted(unknown)}")
+    for key in ("alarm_minutes", "idle_minutes", "silent_minutes"):
+        if al[key] <= 0:
+            raise ValueError(f"alerts: {key} must be above 0")
+    if not set(al["drift_levels"]) <= {"WATCH", "ACT"}:
+        raise ValueError("alerts: drift_levels can only hold WATCH and ACT")
+    if not set(al["maintenance_levels"]) <= {"OVERDUE", "DUE SOON", "NO RECORD"}:
+        raise ValueError("alerts: maintenance_levels can only hold OVERDUE, DUE SOON, NO RECORD")
 
     for j in s["maintenance_jobs"]:
         if "job" not in j or j.get("every_h", 0) <= 0:
