@@ -2,7 +2,9 @@
 
 import pandas as pd
 
-from test_classification import classify_frame, RUNNING, IDLE, SETUP, ALARM, OFF, NO_DATA
+from test_classification import (
+    classify_frame, RUNNING, IDLE, SETUP, ALARM, OFF, NO_DATA, NOT_RESPONDING, PLANNED_STOP,
+)
 from state_events import to_events, mark_setup
 from settings import load_settings
 
@@ -16,13 +18,17 @@ def availability(events, setup_is_planned):
     )
  
     # all states exist
-    seconds = seconds.reindex(columns=[RUNNING, IDLE, SETUP, ALARM, OFF, NO_DATA], fill_value=0)
+    seconds = seconds.reindex(
+        columns=[RUNNING, IDLE, SETUP, ALARM, OFF, NO_DATA, NOT_RESPONDING, PLANNED_STOP],
+        fill_value=0,
+    )
 
     table = pd.DataFrame(index=seconds.index)
     table["run_s"] = seconds[RUNNING]
 
-    # lunch and missing data are not planned time
-    planned = seconds.sum(axis=1) - seconds[OFF] - seconds[NO_DATA]
+    # breaks and missing data are not planned time
+    # a machine that did not answer during working time is: that time was lost
+    planned = seconds.sum(axis=1) - seconds[OFF] - seconds[NO_DATA] - seconds[PLANNED_STOP]
 
     if setup_is_planned:
         planned = planned - seconds[SETUP]

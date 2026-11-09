@@ -9,6 +9,14 @@ ALARM = "ALARM"
 OFF = "OFF"
 NO_DATA = "NO_DATA"
 
+# the box was fine and the network was up, but the machine did not answer
+NOT_RESPONDING = "NOT_RESPONDING"
+# a break, or time outside the shifts. Not a loss.
+PLANNED_STOP = "PLANNED_STOP"
+
+# the states that count as a stop in the downtime numbers
+STOPS = [IDLE, SETUP, NOT_RESPONDING]
+
 def classify(row):
     if row["alarm_code"] != 0:
         return ALARM

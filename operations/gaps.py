@@ -2,7 +2,7 @@
 
 import pandas as pd
 
-from test_classification import classify_frame, NO_DATA
+from test_classification import classify_frame, NO_DATA, NOT_RESPONDING, PLANNED_STOP
 from state_events import to_events, mark_setup
 from availability import availability
 from settings import load_settings
@@ -32,28 +32,86 @@ def find_gaps(df, gap_seconds):
     ).reset_index(drop=True)
 
 
-def fill_gaps(df, gap_seconds):
-    # call this AFTER classify_frame, so the new rows keep the NO_DATA state
+def healthy_windows(heartbeat, every=5, max_spacing=15):
+    # when the box was running and could reach the network: [(from, to), ...]
+    # no heartbeats (a replay or a CSV file) means nothing is known, so every gap is NO_DATA
+
+    if heartbeat is None or heartbeat.empty:
+        return []
+
+    beats = pd.to_datetime(heartbeat[heartbeat["network_ok"] == 1]["timestamp"], utc=True).sort_values()
+    windows = []
+    for t in beats:
+        if windows and (t - windows[-1][1]).total_seconds() <= max_spacing:
+            windows[-1][1] = t
+        else:
+            windows.append([t, t])
+
+    # a beat speaks for the seconds up to the next one
+    return [(a, b + pd.Timedelta(seconds=every - 1)) for a, b in windows]
+
+
+def split_by_health(start, end, healthy):
+    # cuts a silent period into the part where the box was fine and the part where it was not
+    out = []
+    cursor = start
+    one = pd.Timedelta(seconds=1)
+
+    for good_from, good_to in healthy or []:
+        if good_to < cursor:
+            continue
+        if good_from > end:
+            break
+        if good_from > cursor:
+            out.append((cursor, good_from - one, NO_DATA))
+            cursor = good_from
+        stop = min(good_to, end)
+        out.append((cursor, stop, NOT_RESPONDING))
+        cursor = stop + one
+        if cursor > end:
+            return out
+
+    if cursor <= end:
+        out.append((cursor, end, NO_DATA))
+    return out
+
+
+def fill_gaps(df, gap_seconds, healthy=None, start=None, end=None, machines=None):
+    # call this AFTER classify_frame, so the new rows keep their state
+    # with start and end, silence before the first and after the last reading counts too,
+    # and so does a machine in `machines` that has no readings at all
 
     df = df.copy()
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
 
     gaps = find_gaps(df, gap_seconds)
-    if gaps.empty:
+    spans = list(zip(gaps["machine"], gaps["gap_start"], gaps["gap_end"]))
+
+    if end is not None:
+        one = pd.Timedelta(seconds=1)
+        for machine in sorted(set(df["machine_code"]) | set(machines or [])):
+            times = df.loc[df["machine_code"] == machine, "timestamp"]
+            if times.empty:
+                spans.append((machine, start, end))
+                continue
+            if (times.min() - start).total_seconds() > gap_seconds:
+                spans.append((machine, start, times.min() - one))
+            if (end - times.max()).total_seconds() > gap_seconds:
+                spans.append((machine, times.max() + one, end))
+
+    rows = []
+    for machine, gap_start, gap_end in spans:
+        for a, b, state in split_by_health(gap_start, gap_end, healthy):
+            rows.append({"machine_code": machine, "timestamp": a, "state": state})
+            rows.append({"machine_code": machine, "timestamp": b, "state": state})
+
+    if not rows:
         return df
 
-    first = pd.DataFrame({
-        "machine_code": gaps["machine"],
-        "timestamp": gaps["gap_start"],
-        "state": NO_DATA,
-    })
-    last = pd.DataFrame({
-        "machine_code": gaps["machine"],
-        "timestamp": gaps["gap_end"],
-        "state": NO_DATA,
-    })
+    added = pd.DataFrame(rows)
+    added["timestamp"] = pd.to_datetime(added["timestamp"], utc=True)
 
-    both = pd.concat([df, first, last], ignore_index=True)
+    both = pd.concat([df, added], ignore_index=True)
     return both.sort_values(["machine_code", "timestamp"]).reset_index(drop=True)
 
 
@@ -64,7 +122,8 @@ def coverage(events):
 
     # a machine with no gaps has no NO_DATA column. Use 0 then.
     no_data = seconds.get(NO_DATA, pd.Series(0, index=seconds.index))
-    total = seconds.sum(axis=1)
+    # share of the working time. Breaks do not count either way.
+    total = seconds.sum(axis=1) - seconds.get(PLANNED_STOP, pd.Series(0, index=seconds.index))
 
     holes = events[events["state"] == NO_DATA]
 
