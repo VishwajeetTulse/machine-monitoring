@@ -194,6 +194,13 @@ def test_a_report_is_written_only_once(shop, monkeypatch):
     assert shift_report.check(shop["settings"], now=after) == []
 
 
+def test_live_mtbf_numbers_stay_numeric(shop, monkeypatch):
+    fill(two_parts(MON))
+    freeze(monkeypatch, MON + pd.Timedelta(minutes=3))
+    tables = run_all.run(shop["path"], "unused", source="live")
+    assert tables["mtbf_mttr"]["run_min"].dtype.kind == "f"
+
+
 def test_mtbf_adds_up_across_days(shop, monkeypatch):
     # one failure a day, for 2 days: 120 s of run time and 2 failures in total
     from helpers import alarm

@@ -113,7 +113,8 @@ def calculate(df, s, rejects=None, window=None, day=None):
     today = None
     if window:
         today = daily_row(day, totals, df)
-        rollup = pd.concat([load_rollup(DB, day, HISTORY_DAYS), today], ignore_index=True)
+        history = load_rollup(DB, day, HISTORY_DAYS)
+        rollup = today if history.empty else pd.concat([history, today], ignore_index=True)
         added = rollup.groupby("machine")[["failures", "run_s", "alarm_s"]].sum()
         mtbf_table = mtbf_from_totals(added).rename_axis("machine").reset_index()
         hours = hours_from_rollup(rollup)

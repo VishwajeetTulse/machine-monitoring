@@ -1,6 +1,7 @@
 # runs the whole system again and again, so nobody has to type commands
 
 import argparse
+import os
 import time
 from datetime import datetime
 
@@ -39,6 +40,9 @@ if __name__ == "__main__":
     a = p.parse_args()
 
     settings = load_settings(a.settings)
+
+    # a fresh checkout has no output folder yet
+    os.makedirs("output", exist_ok=True)
 
     if a.fresh:
         alerts.reset()
