@@ -40,6 +40,29 @@ def cutting_hours(df, zone):
     return pd.DataFrame(rows).T.reindex(machines)
 
 
+def hours_from_rollup(rows):
+    # the same table as cutting_hours, from the daily totals
+    # finished days give the rate. Today only counts while there is nothing else.
+
+    machines = sorted(rows["machine"].unique())
+    out = {}
+
+    for machine, g in rows.groupby("machine"):
+        known = g.dropna(subset=["cut_first_min", "cut_last_min"]).sort_values("work_date")
+        if known.empty:
+            out[machine] = {"now_h": float("nan"), "per_day_h": float("nan")}
+            continue
+
+        finished = known.iloc[:-1] if len(known) > 1 else known
+        added_h = (finished["cut_last_min"].iloc[-1] - finished["cut_first_min"].iloc[0]) / 60
+        out[machine] = {
+            "now_h": known["cut_last_min"].iloc[-1] / 60,
+            "per_day_h": added_h / len(finished),
+        }
+
+    return pd.DataFrame(out).T.reindex(machines)
+
+
 def maintenance_due(hours, jobs, last_done):
 
     rows = []

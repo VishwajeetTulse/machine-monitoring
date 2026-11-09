@@ -73,10 +73,11 @@ def write_text(client, rows):
     return "\n".join(lines)
 
 
-def check(settings, results_db=RESULTS_DB, report_dir=REPORT_DIR):
+def check(settings, results_db=RESULTS_DB, report_dir=REPORT_DIR, now=None):
     # writes the report of every finished shift that has none yet
+    # now = the real clock. Without it, the newest data decides.
     summary = query(results_db, "SELECT * FROM shift_summary")
-    clock = data_clock(results_db)
+    clock = now if now is not None else data_clock(results_db)
     if summary.empty or clock is None:
         return []
 

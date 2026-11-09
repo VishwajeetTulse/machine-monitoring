@@ -7,7 +7,7 @@ from state_events import to_events, mark_setup
 from settings import load_settings
 
 
-def mtbf_mttr(events, failure_codes=()):
+def mtbf_totals(events, failure_codes=()):
 
     # run time per machine
     run_s = events[events["state"] == RUNNING].groupby("machine")["duration_s"].sum()
@@ -30,6 +30,14 @@ def mtbf_mttr(events, failure_codes=()):
     table["run_s"] = run_s.reindex(machines).fillna(0)
     table["alarm_s"] = alarms["sum"].reindex(machines).fillna(0)
 
+    return table
+
+
+def mtbf_from_totals(table):
+
+    table = table[["failures", "run_s", "alarm_s"]].copy()
+    table["failures"] = table["failures"].astype(int)
+
     # add the seconds first, then divide
     table.loc["ALL"] = [table["failures"].sum(), table["run_s"].sum(), table["alarm_s"].sum()]
     table["failures"] = table["failures"].astype(int)
@@ -48,6 +56,10 @@ def mtbf_mttr(events, failure_codes=()):
     out.loc[out["failures"] == 1, "note"] = "only 1 failure"
 
     return out
+
+
+def mtbf_mttr(events, failure_codes=()):
+    return mtbf_from_totals(mtbf_totals(events, failure_codes))
 
 
 if __name__ == "__main__":

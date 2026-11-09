@@ -6,7 +6,8 @@ import sqlite3
 import pandas as pd
 
 from settings import load_settings
-from store import query
+from shift_calendar import is_working
+from store import query, live_now
 
 RESULTS_DB = "output/results.db"
 LIVE_DB = "output/live.db"
@@ -24,24 +25,39 @@ def latest_events(results_db):
     return e.groupby("machine").tail(1)
 
 
-def reference(live_db):
-    # newest reading of each machine, and the newest of all (the clock)
+def last_readings(live_db):
+    # newest reading of each machine
     last = query(live_db, "SELECT machine_code, MAX(timestamp) AS last FROM readings GROUP BY machine_code")
-    if last.empty:
-        return None, last
     last["last"] = pd.to_datetime(last["last"], utc=True)
-    return last["last"].max(), last
+    return last
 
 
-def conditions(settings, results_db, live_db):
+def conditions(settings, results_db, live_db, now=None, silent_only=False):
+    # silent_only: there are no results for today, so only silence can be judged
 
     a = settings["alerts"]
     zone = settings["timezone"]
     found = []
 
-    now, last = reference(live_db)
+    now = now if now is not None else live_now(live_db)
     if now is None:
         return None, found
+    last = last_readings(live_db)
+
+    # machine silent. Outside working time a silent machine is normal.
+    if is_working(now, settings):
+        for _, r in last.iterrows():
+            minutes = (now - r["last"]).total_seconds() / 60
+            if minutes >= a["silent_minutes"]:
+                stamp = r["last"].strftime("%Y-%m-%dT%H:%M:%SZ")
+                found.append({
+                    "key": f"silent|{r['machine_code']}|{stamp}",
+                    "rule": "silent", "machine": r["machine_code"], "since": stamp,
+                    "message": f"{r['machine_code']} sent no readings for {minutes:.0f} min, last reading {clock(stamp, zone)}",
+                })
+
+    if silent_only:
+        return now, found
 
     # alarm too long, idle too long
     for _, e in latest_events(results_db).iterrows():
@@ -62,17 +78,6 @@ def conditions(settings, results_db, live_db):
                 "key": f"idle|{e['machine']}|{e['started_at']}",
                 "rule": "idle", "machine": e["machine"], "since": e["started_at"],
                 "message": f"{e['machine']} idle for {minutes:.0f} min, reason {reason}, since {since}",
-            })
-
-    # machine silent
-    for _, r in last.iterrows():
-        minutes = (now - r["last"]).total_seconds() / 60
-        if minutes >= a["silent_minutes"]:
-            stamp = r["last"].strftime("%Y-%m-%dT%H:%M:%SZ")
-            found.append({
-                "key": f"silent|{r['machine_code']}|{stamp}",
-                "rule": "silent", "machine": r["machine_code"], "since": stamp,
-                "message": f"{r['machine_code']} sent no readings for {minutes:.0f} min, last reading {clock(stamp, zone)}",
             })
 
     # drift: the current program run of each machine
@@ -153,8 +158,8 @@ def sync(results_db, now, found):
     return opened, cleared
 
 
-def check(settings, results_db=RESULTS_DB, live_db=LIVE_DB):
-    now, found = conditions(settings, results_db, live_db)
+def check(settings, results_db=RESULTS_DB, live_db=LIVE_DB, now=None, silent_only=False):
+    now, found = conditions(settings, results_db, live_db, now, silent_only)
     if now is None:
         return [], []
     return sync(results_db, now, found)

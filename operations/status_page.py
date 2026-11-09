@@ -10,6 +10,8 @@ from flask import Flask, jsonify, request
 
 import reasons
 from settings import load_settings
+from shift_calendar import working_day_start
+from store import live_now
 
 RESULTS_DB = "output/results.db"
 LIVE_DB = "output/live.db"
@@ -55,13 +57,22 @@ def build():
     downtime = read(RESULTS_DB, "SELECT machine, reason, minutes FROM downtime")
 
     out = {"client": SETTINGS["client"], "time": "", "machines": [], "shop": None,
-           "open": [], "recent": [], "choices": SETTINGS["stop_reasons"]}
+           "open": [], "recent": [], "choices": SETTINGS["stop_reasons"], "no_data_since": None}
     if last.empty:
         return out
 
     last["last"] = pd.to_datetime(last["last"], utc=True)
-    now = last["last"].max()
-    out["time"] = now.tz_convert(zone).strftime("%H:%M:%S")
+    newest = last["last"].max()
+    now = live_now(LIVE_DB)
+    out["time"] = newest.tz_convert(zone).strftime("%H:%M:%S")
+
+    # nothing has arrived for a while: the collector or the whole shop is down
+    if (now - newest).total_seconds() / 60 >= silent_min:
+        out["no_data_since"] = newest.tz_convert(zone).strftime("%H:%M")
+
+    # results from an earlier working day must not be shown as today's
+    if not events.empty and pd.to_datetime(events["ended_at"], utc=True).max() < working_day_start(now, SETTINGS):
+        events, oee, parts, downtime = (pd.DataFrame() for _ in range(4))
 
     latest = {}
     if not events.empty:
@@ -224,6 +235,8 @@ PAGE = """<!doctype html>
   .brand sup { color: var(--orange); font-size: 13px; font-family: var(--sans); }
   .live { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
   .live i { width: 7px; height: 7px; border-radius: 50%; background: var(--green); font-style: normal; }
+  .live.stale { color: var(--orange); font-weight: 600; }
+  .live.stale i { background: var(--orange); }
 
   main { max-width: 1200px; margin: 0 auto; padding: 36px 32px 80px; }
 
@@ -264,7 +277,7 @@ PAGE = """<!doctype html>
   .m.ALARM { background: var(--down-bg); border-color: var(--down-line); }
   .m.ALARM .st { color: var(--orange); }
   .m.ALARM .bar span { background: var(--orange); }
-  .m.SILENT, .m.OFF, .m.NO_DATA { opacity: .72; }
+  .m.SILENT, .m.OFF, .m.NO_DATA, .m.PLANNED_STOP, .m.NOT_RESPONDING { opacity: .72; }
 
   .ask { background: var(--panel-2); border-radius: 14px; padding: 16px; margin-top: 12px;
          display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
@@ -304,7 +317,7 @@ PAGE = """<!doctype html>
 <body>
 <header>
   <div class="brand" id="client">Machine status<sup>+</sup></div>
-  <div class="live"><i></i><span id="time">waiting for data</span></div>
+  <div class="live" id="livebar"><i></i><span id="time">waiting for data</span></div>
 </header>
 <main>
   <div class="kpis" id="shop"></div>
@@ -391,9 +404,10 @@ function table(rows, cleared) {
 
 function draw(d) {
   document.getElementById("client").innerHTML = d.client + "<sup>+</sup>";
-  document.getElementById("time").textContent = d.time ? "Live " + d.time : "waiting for data";
-  document.getElementById("boardtime").textContent = d.time ? "Live board  &middot;  " + d.time : "Live board";
-  document.getElementById("boardtime").innerHTML = d.time ? "Live board &middot; " + d.time : "Live board";
+  var stale = d.no_data_since;
+  document.getElementById("time").textContent = stale ? "No data since " + stale : (d.time ? "Live " + d.time : "waiting for data");
+  document.getElementById("livebar").className = stale ? "live stale" : "live";
+  document.getElementById("boardtime").innerHTML = stale ? "No data since " + stale : (d.time ? "Live board &middot; " + d.time : "Live board");
   document.getElementById("count").textContent = d.machines.length + " machines";
 
   var s = d.shop;
