@@ -33,12 +33,12 @@ def load(db=LIVE_DB):
     try:
         con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=30)
     except sqlite3.OperationalError:
-        return pd.DataFrame(columns=["machine", "at", "reason"])
+        return pd.DataFrame(columns=["machine", "at", "reason", "entered_at"])
     try:
-        return pd.read_sql_query("SELECT machine, at, reason FROM reasons ORDER BY at, rowid", con)
+        return pd.read_sql_query("SELECT machine, at, reason, entered_at FROM reasons ORDER BY at, rowid", con)
     except Exception:
         # table not created yet
-        return pd.DataFrame(columns=["machine", "at", "reason"])
+        return pd.DataFrame(columns=["machine", "at", "reason", "entered_at"])
     finally:
         con.close()
 

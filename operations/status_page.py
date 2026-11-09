@@ -18,14 +18,14 @@ app = Flask(__name__)
 SETTINGS = {}
 
 
-def read(db, sql):
+def read(db, sql, values=()):
     # read-only connection, so the page can never change the data
     try:
         con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5)
     except sqlite3.OperationalError:
         return pd.DataFrame()
     try:
-        return pd.read_sql_query(sql, con)
+        return pd.read_sql_query(sql, con, params=values)
     except Exception:
         # table not created yet
         return pd.DataFrame()
@@ -52,6 +52,7 @@ def build():
     oee = read(RESULTS_DB, "SELECT * FROM oee")
     parts = read(RESULTS_DB, "SELECT machine, SUM(parts_added) AS parts FROM parts GROUP BY machine")
     alerts = read(RESULTS_DB, "SELECT * FROM alerts")
+    downtime = read(RESULTS_DB, "SELECT machine, reason, minutes FROM downtime")
 
     out = {"client": SETTINGS["client"], "time": "", "machines": [], "shop": None,
            "open": [], "recent": [], "choices": SETTINGS["stop_reasons"]}
@@ -83,18 +84,31 @@ def build():
         o = oee_rows.get(m)
 
         reason = None if e is None or pd.isna(e["reason"]) else e["reason"]
+        set_by = "machine" if reason else None
+        set_at = None
+
         # a tap made since this stop began shows at once, before the next calculation
         if e is not None:
             mine = taps[(taps["machine"] == m) & (taps["at"] >= pd.to_datetime(e["started_at"], utc=True))]
             if not mine.empty:
                 reason = mine.iloc[-1]["reason"]
+                set_by = "operator"
+                set_at = local(mine.iloc[-1]["entered_at"], zone)
+
+        # today's lost minutes of this machine, biggest first
+        lost = []
+        if not downtime.empty:
+            mine = downtime[downtime["machine"] == m].sort_values("minutes", ascending=False)
+            lost = [{"reason": r["reason"], "minutes": number(r["minutes"])} for _, r in mine.head(4).iterrows()]
 
         out["machines"].append({
             "machine": m,
             "state": state,
             "can_pick": state in reasons.STOP_STATES,
-            "stop_at": None if e is None else e["ended_at"],
             "reason": reason,
+            "set_by": set_by,
+            "set_at": set_at,
+            "lost": lost,
             "program": None if e is None or pd.isna(e["program_number"]) else int(e["program_number"]),
             "since_min": number(since, 0) if not silent else number((now - row["last"]).total_seconds() / 60, 0),
             "last_reading": local(row["last"].isoformat(), zone),
@@ -141,13 +155,19 @@ def api_reason():
     if reason not in SETTINGS["stop_reasons"]:
         return jsonify({"error": "unknown reason"}), 400
 
-    # only a machine that is stopped right now can be given a reason
-    current = {m["machine"]: m for m in build()["machines"]}
-    if machine not in current or not current[machine]["can_pick"]:
-        return jsonify({"error": "machine is not stopped"}), 400
+    # the newest stop of this machine. A tap a few seconds late still lands on it.
+    marks = ", ".join("?" for _ in reasons.STOP_STATES)
+    stop = read(
+        RESULTS_DB,
+        f"SELECT ended_at FROM events WHERE machine = ? AND state IN ({marks}) "
+        "ORDER BY started_at DESC LIMIT 1",
+        (machine, *reasons.STOP_STATES),
+    )
+    if stop.empty:
+        return jsonify({"error": f"no stop found for {machine} yet"}), 400
 
-    # the tap belongs to the stop the operator sees, so it is stamped inside that stop
-    reasons.add_reason(machine, current[machine]["stop_at"], reason, LIVE_DB)
+    # stamped inside that stop, so the calculation gives the reason to it
+    reasons.add_reason(machine, stop.iloc[0]["ended_at"], reason, LIVE_DB)
     return jsonify({"ok": True})
 
 
@@ -157,84 +177,249 @@ def home():
 
 
 PAGE = """<!doctype html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#e2e3dc">
 <title>Machine status</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  body { font-family: Arial, sans-serif; margin: 0; background: #f2f4f7; color: #1d2733; }
-  header { background: #1d2733; color: #fff; padding: 14px 20px; display: flex; justify-content: space-between; }
-  header h1 { margin: 0; font-size: 20px; }
-  main { padding: 20px; max-width: 1100px; margin: auto; }
-  h2 { font-size: 16px; margin: 24px 0 10px; }
-  .shop { display: flex; gap: 12px; flex-wrap: wrap; }
-  .box { background: #fff; border-radius: 6px; padding: 12px 16px; min-width: 130px; }
-  .box b { display: block; font-size: 24px; }
-  .box span { font-size: 12px; color: #667; }
-  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
-  .card { background: #fff; border-radius: 6px; padding: 14px; border-top: 6px solid #999; }
-  .card h3 { margin: 0 0 4px; font-size: 18px; }
-  .state { font-weight: bold; }
-  .small { font-size: 13px; color: #556; margin: 3px 0; }
-  .RUNNING { border-top-color: #2e9e4f; } .RUNNING .state { color: #2e9e4f; }
-  .IDLE { border-top-color: #e0a800; } .IDLE .state { color: #b38600; }
-  .SETUP { border-top-color: #3b82c4; } .SETUP .state { color: #3b82c4; }
-  .ALARM { border-top-color: #d63b3b; } .ALARM .state { color: #d63b3b; }
-  .SILENT, .OFF, .NO_DATA { border-top-color: #888; } .SILENT .state, .OFF .state, .NO_DATA .state { color: #666; }
-  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 6px; }
-  td, th { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e6e9ee; font-size: 14px; }
-  th { background: #e9edf2; }
-  .none { color: #667; font-size: 14px; }
-  .stop { background: #fff; border-radius: 6px; padding: 10px 14px; margin-bottom: 8px;
-          display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-  .stop .who { min-width: 150px; }
-  .stop .who b { font-size: 16px; }
-  .stop .who span { display: block; font-size: 12px; color: #667; }
-  .stop button { border: 1px solid #b9c2cc; background: #fff; border-radius: 14px; padding: 6px 12px;
-                 margin: 2px 4px 2px 0; font-size: 13px; cursor: pointer; }
-  .stop button.on { background: #1d2733; color: #fff; border-color: #1d2733; }
+  :root {
+    --bone: #e6e6e2;
+    --card: #ededea;
+    --ink: #121211;
+    --muted: #6a6a64;
+    --line: #d5d5ce;
+    --panel: #0d0d0c;
+    --panel-2: #1a1a18;
+    --panel-line: #2b2b27;
+    --panel-text: #f2f2ee;
+    --panel-muted: #8f8f88;
+    --orange: #ff3b00;
+    --green: #5fc27e;
+    --amber: #e3ab2e;
+    --down-bg: #2a100a;
+    --down-line: #7d3018;
+    --serif: "Instrument Serif", "Iowan Old Style", Georgia, serif;
+    --sans: "Inter", -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bone); color: var(--ink); font-family: var(--sans);
+    font-feature-settings: "tnum" 1; -webkit-font-smoothing: antialiased;
+    background-image:
+      linear-gradient(to right, rgba(0,0,0,.028) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(0,0,0,.028) 1px, transparent 1px);
+    background-size: 120px 120px;
+  }
+  header {
+    position: sticky; top: 0; z-index: 5; background: rgba(230,230,226,.92);
+    backdrop-filter: blur(8px); border-bottom: 1px solid var(--line);
+    padding: 16px 32px; display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  }
+  .brand { font-family: var(--serif); font-size: 26px; line-height: 1; }
+  .brand sup { color: var(--orange); font-size: 13px; font-family: var(--sans); }
+  .live { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  .live i { width: 7px; height: 7px; border-radius: 50%; background: var(--green); font-style: normal; }
+
+  main { max-width: 1200px; margin: 0 auto; padding: 36px 32px 80px; }
+
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  .kpi {
+    background: linear-gradient(180deg, #f1f1ee 0%, var(--card) 100%);
+    border: 1px solid rgba(255,255,255,.7); border-radius: 20px; padding: 22px 24px;
+    box-shadow: 0 1px 2px rgba(0,0,0,.05), 0 8px 24px -14px rgba(0,0,0,.25);
+  }
+  .kpi b { display: block; font-family: var(--serif); font-size: 46px; font-weight: 400;
+           line-height: 1; letter-spacing: -.01em; margin-bottom: 8px; }
+  .kpi span { font-size: 13px; color: var(--muted); }
+
+  h2 { font-family: var(--serif); font-weight: 400; font-size: 34px; margin: 48px 0 16px; letter-spacing: -.01em; }
+  .sub { font-size: 14px; color: var(--muted); margin: -10px 0 18px; }
+
+  .board { background: var(--panel); border-radius: 22px; padding: 20px; color: var(--panel-text);
+           box-shadow: 0 30px 60px -30px rgba(0,0,0,.5); }
+  .board-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .board-top .left { display: flex; align-items: center; gap: 9px; font-size: 14px; }
+  .board-top .left i { width: 7px; height: 7px; border-radius: 50%; background: var(--green); font-style: normal; }
+  .tag { background: var(--panel-2); color: var(--panel-muted); font-size: 12px; font-weight: 600;
+         border-radius: 999px; padding: 6px 12px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; }
+  .m { background: var(--panel-2); border: 1px solid transparent; border-radius: 14px; padding: 16px; }
+  .m-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .m-top b { font-size: 17px; font-weight: 600; }
+  .st { font-size: 13px; color: var(--panel-muted); display: inline-flex; align-items: center; gap: 7px; }
+  .st i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; font-style: normal; }
+  .m-line { font-size: 14px; margin-bottom: 4px; }
+  .m-sub { font-size: 13px; color: var(--panel-muted); margin-bottom: 14px; }
+  .bar { height: 4px; border-radius: 999px; background: #2e2e2a; overflow: hidden; margin-bottom: 8px; }
+  .bar span { display: block; height: 100%; border-radius: 999px; background: #d8d8d2; }
+  .m-foot { font-size: 12px; color: var(--panel-muted); }
+  .m.RUNNING .st { color: var(--green); }
+  .m.IDLE .st, .m.SETUP .st { color: var(--amber); }
+  .m.ALARM { background: var(--down-bg); border-color: var(--down-line); }
+  .m.ALARM .st { color: var(--orange); }
+  .m.ALARM .bar span { background: var(--orange); }
+  .m.SILENT, .m.OFF, .m.NO_DATA { opacity: .72; }
+
+  .ask { background: var(--panel-2); border-radius: 14px; padding: 16px; margin-top: 12px;
+         display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
+  .ask .q { font-size: 14px; flex: 1; min-width: 260px; }
+  .ask .q b { font-weight: 600; }
+  .ask .q .saved { color: var(--green); }
+  .ask .q .warn { color: var(--orange); }
+  .ask .pills { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+  button {
+    font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap;
+    border: 1px solid #343430; background: #232320; color: var(--panel-text);
+    border-radius: 999px; padding: 9px 16px;
+  }
+  button:hover { border-color: #55554f; }
+  button.on { background: var(--orange); border-color: var(--orange); color: #fff;
+              box-shadow: 0 0 0 4px rgba(255,59,0,.22), 0 6px 18px -6px rgba(255,59,0,.7); }
+  .lost { font-size: 12px; color: var(--panel-muted); margin-top: 10px; width: 100%; }
+  .lost em { font-style: normal; color: var(--panel-text); }
+
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; padding: 0 16px 10px 0; font-size: 12px; letter-spacing: .1em;
+       text-transform: uppercase; color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--line); }
+  td { padding: 13px 16px 13px 0; font-size: 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td.t { width: 76px; color: var(--muted); }
+  td.m2 { width: 84px; font-weight: 600; }
+  .none { font-size: 14px; color: var(--muted); padding: 14px 0; }
+
+  @media (max-width: 820px) {
+    header, main { padding-left: 18px; padding-right: 18px; }
+    .kpis { grid-template-columns: repeat(2, 1fr); }
+    .kpi b { font-size: 36px; }
+    h2 { font-size: 28px; }
+    .ask .pills { justify-content: flex-start; }
+  }
 </style>
 </head>
 <body>
-<header><h1 id="client">Machine status</h1><div id="time">waiting for data...</div></header>
+<header>
+  <div class="brand" id="client">Machine status<sup>+</sup></div>
+  <div class="live"><i></i><span id="time">waiting for data</span></div>
+</header>
 <main>
-  <div class="shop" id="shop"></div>
-  <h2>Machines</h2>
-  <div class="cards" id="cards"></div>
-  <h2>Stopped now: tap the reason</h2>
-  <div id="stops"></div>
+  <div class="kpis" id="shop"></div>
+
+  <h2>Live board</h2>
+  <div class="sub">What is running, what is stopped, and why.</div>
+  <div class="board">
+    <div class="board-top">
+      <div class="left"><i></i><span id="boardtime">Live board</span></div>
+      <div class="tag" id="count"></div>
+    </div>
+    <div class="grid" id="cards"></div>
+    <div id="stops"></div>
+  </div>
+
   <h2>Open alerts</h2>
   <div id="open"></div>
-  <h2>Recently cleared</h2>
+
+  <h2>Cleared</h2>
   <div id="recent"></div>
 </main>
 <script>
-function show(v, unit) { return v === null || v === undefined ? "-" : v + (unit || ""); }
+var flash = {};
 
-function table(rows, cleared) {
-  if (!rows.length) return '<div class="none">none</div>';
-  var h = "<table><tr><th>Opened</th>" + (cleared ? "<th>Cleared</th>" : "") + "<th>Machine</th><th>Alert</th></tr>";
-  rows.forEach(function (r) {
-    h += "<tr><td>" + r.opened + "</td>" + (cleared ? "<td>" + r.cleared + "</td>" : "") +
-         "<td>" + r.machine + "</td><td>" + r.message + "</td></tr>";
-  });
-  return h + "</table>";
+function show(v, unit) { return v === null || v === undefined ? "-" : v + (unit || ""); }
+function nice(c) { return c.replace(/_/g, " "); }
+function title(s) { return s.charAt(0) + s.slice(1).toLowerCase().replace(/_/g, " "); }
+
+function kpi(value, name) {
+  return '<div class="kpi"><b>' + value + "</b><span>" + name + "</span></div>";
+}
+
+function question(m) {
+  var f = flash[m.machine];
+  if (f && f.until > Date.now() && f.error) {
+    return '<span class="warn">Not saved: ' + f.error + "</span>";
+  }
+  if (f && f.until > Date.now()) {
+    return '<span class="saved">Saved. This stop counts as <b>' + nice(f.reason) + "</b>.</span>";
+  }
+  if (!m.reason) {
+    return "<b>" + m.machine + "</b> stopped " + show(m.since_min, " min") +
+           '. <span class="warn">No reason yet</span>, so it counts as unknown.';
+  }
+  if (m.set_by === "operator") {
+    return "<b>" + m.machine + "</b> stopped " + show(m.since_min, " min") + ". Reason <b>" +
+           nice(m.reason) + "</b>, set by operator at " + m.set_at + ".";
+  }
+  return "<b>" + m.machine + "</b> stopped " + show(m.since_min, " min") + ". Reason <b>" +
+         nice(m.reason) + "</b>, guessed from the machine. Tap to correct it.";
+}
+
+function lostLine(m) {
+  if (!m.lost || !m.lost.length) return "";
+  var bits = m.lost.map(function (l) { return "<em>" + nice(l.reason) + "</em> " + l.minutes + " min"; });
+  return '<div class="lost">Lost today on ' + m.machine + ": " + bits.join("&nbsp; &middot;&nbsp; ") + "</div>";
 }
 
 function stops(d) {
   var h = "";
   d.machines.forEach(function (m) {
     if (!m.can_pick) return;
-    h += '<div class="stop"><div class="who"><b>' + m.machine + '</b><span>' + m.state +
-         ' for ' + show(m.since_min, " min") + '</span></div><div>';
+    h += '<div class="ask"><div class="q">' + question(m) + '</div><div class="pills">';
     d.choices.forEach(function (c) {
       h += '<button data-machine="' + m.machine + '" data-reason="' + c + '"' +
-           (c === m.reason ? ' class="on"' : '') + '>' + c.replace(/_/g, " ") + '</button>';
+           (c === m.reason ? ' class="on"' : "") + ">" + nice(c) + "</button>";
     });
-    h += "</div></div>";
+    h += "</div>" + lostLine(m) + "</div>";
   });
-  return h || '<div class="none">no machine is stopped</div>';
+  return h;
+}
+
+function table(rows, cleared) {
+  if (!rows.length) return '<div class="none">Nothing here.</div>';
+  var h = "<table><tr><th>Opened</th>" + (cleared ? "<th>Cleared</th>" : "") +
+          "<th>Machine</th><th>Alert</th></tr>";
+  rows.forEach(function (r) {
+    h += '<tr><td class="t">' + r.opened + "</td>" +
+         (cleared ? '<td class="t">' + r.cleared + "</td>" : "") +
+         '<td class="m2">' + r.machine + "</td><td>" + r.message + "</td></tr>";
+  });
+  return h + "</table>";
+}
+
+function draw(d) {
+  document.getElementById("client").innerHTML = d.client + "<sup>+</sup>";
+  document.getElementById("time").textContent = d.time ? "Live " + d.time : "waiting for data";
+  document.getElementById("boardtime").textContent = d.time ? "Live board  &middot;  " + d.time : "Live board";
+  document.getElementById("boardtime").innerHTML = d.time ? "Live board &middot; " + d.time : "Live board";
+  document.getElementById("count").textContent = d.machines.length + " machines";
+
+  var s = d.shop;
+  document.getElementById("shop").innerHTML = s ?
+    kpi(show(s.oee, "%"), "Shop OEE") + kpi(show(s.availability, "%"), "Availability") +
+    kpi(show(s.performance, "%"), "Performance") + kpi(s.parts, "Parts today") : "";
+
+  var c = "";
+  d.machines.forEach(function (m) {
+    var sub = m.state === "SILENT" ? "No readings since " + m.last_reading :
+              show(m.since_min, " min") + (m.reason ? " &middot; " + nice(m.reason) : "");
+    var width = m.oee === null || m.oee === undefined ? 0 : Math.min(100, m.oee);
+    c += '<div class="m ' + m.state + '"><div class="m-top"><b>' + m.machine + "</b>" +
+         '<span class="st"><i></i>' + title(m.state) + "</span></div>" +
+         '<div class="m-line">' + (m.program ? "Program " + m.program + " &middot; " : "") +
+         m.parts + " parts</div>" +
+         '<div class="m-sub">' + sub + "</div>" +
+         '<div class="bar"><span style="width:' + width + '%"></span></div>' +
+         '<div class="m-foot">OEE ' + show(m.oee, "%") + " &middot; Avail " + show(m.availability, "%") +
+         " &middot; Perf " + show(m.performance, "%") + "</div></div>";
+  });
+  document.getElementById("cards").innerHTML = c || '<div class="m"><div class="m-sub">No data yet.</div></div>';
+
+  document.getElementById("stops").innerHTML = stops(d);
+  document.getElementById("open").innerHTML = table(d.open, false);
+  document.getElementById("recent").innerHTML = table(d.recent, true);
 }
 
 document.addEventListener("click", function (ev) {
@@ -244,38 +429,14 @@ document.addEventListener("click", function (ev) {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({machine: b.dataset.machine, reason: b.dataset.reason})
-  }).then(load);
-});
-
-function draw(d) {
-  document.getElementById("client").textContent = d.client + " - machine status";
-  document.getElementById("time").textContent = d.time ? "data time " + d.time : "waiting for data...";
-
-  var s = d.shop;
-  document.getElementById("shop").innerHTML = s ?
-    '<div class="box"><b>' + show(s.oee, "%") + '</b><span>Shop OEE</span></div>' +
-    '<div class="box"><b>' + show(s.availability, "%") + '</b><span>Availability</span></div>' +
-    '<div class="box"><b>' + show(s.performance, "%") + '</b><span>Performance</span></div>' +
-    '<div class="box"><b>' + s.parts + '</b><span>Parts</span></div>' : "";
-
-  var c = "";
-  d.machines.forEach(function (m) {
-    var note = m.state === "SILENT" ? "no readings since " + m.last_reading :
-               "for " + show(m.since_min, " min") + (m.reason ? " (" + m.reason + ")" : "");
-    c += '<div class="card ' + m.state + '"><h3>' + m.machine + '</h3>' +
-         '<div class="state">' + m.state + '</div>' +
-         '<div class="small">' + note + '</div>' +
-         '<div class="small">Program: ' + show(m.program) + '</div>' +
-         '<div class="small">Parts: ' + m.parts + '</div>' +
-         '<div class="small">OEE ' + show(m.oee, "%") + ' | Avail ' + show(m.availability, "%") +
-         ' | Perf ' + show(m.performance, "%") + '</div></div>';
+  }).then(function (r) { return r.json(); }).then(function (answer) {
+    flash[b.dataset.machine] = {reason: b.dataset.reason, error: answer.error, until: Date.now() + 6000};
+    load();
+  }).catch(function () {
+    flash[b.dataset.machine] = {error: "the server did not answer", until: Date.now() + 6000};
+    load();
   });
-  document.getElementById("cards").innerHTML = c || '<div class="none">no data yet</div>';
-
-  document.getElementById("stops").innerHTML = stops(d);
-  document.getElementById("open").innerHTML = table(d.open, false);
-  document.getElementById("recent").innerHTML = table(d.recent, true);
-}
+});
 
 function load() {
   fetch("/api/status").then(function (r) { return r.json(); }).then(draw).catch(function () {
