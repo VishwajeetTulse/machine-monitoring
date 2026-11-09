@@ -5,6 +5,10 @@ import pandas as pd
 from part_counting import to_parts
 from settings import load_settings
 
+# always the same columns, even with no runs yet
+COLUMNS = ["machine", "program", "parts", "started_at", "start_pct", "now_pct",
+           "crossed_watch_at", "crossed_act_at", "status"]
+
 
 def drift(parts, window, watch_pct, act_pct):
 
@@ -60,7 +64,7 @@ def drift(parts, window, watch_pct, act_pct):
         )
         rows.append(row)
 
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=COLUMNS)
 
 
 if __name__ == "__main__":

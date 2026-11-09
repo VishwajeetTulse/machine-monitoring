@@ -22,14 +22,27 @@ from quality import load_rejects
 from store import save_tables, add_log, query
 
 DB = "output/results.db"
+LIVE_DB = "output/live.db"
 
 
-def run(settings_path, data_path, rejects_path=None):
+def run(settings_path, data_path, rejects_path=None, source="csv"):
 
     started = time.time()
     s = load_settings(settings_path)
 
-    df = pd.read_csv(data_path, low_memory=False)
+    # readings come from the CSV file, or from the live database
+    if source == "live":
+        try:
+            df = query(LIVE_DB, "SELECT * FROM readings")
+        except Exception:
+            # table does not exist before the first reading arrives
+            df = pd.DataFrame()
+        if df.empty:
+            raise ValueError("no readings in the live database yet")
+        data_path = LIVE_DB
+    else:
+        df = pd.read_csv(data_path, low_memory=False)
+
     df["state"] = classify_frame(df)
 
     # op11: mark missing readings, then op2: events
@@ -107,9 +120,10 @@ if __name__ == "__main__":
     p.add_argument("--settings", default="settings/example_client.json")
     p.add_argument("--data", default="data/cnc_sim_data.csv")
     p.add_argument("--rejects", default=None)
+    p.add_argument("--source", choices=["csv", "live"], default="csv")
     a = p.parse_args()
 
-    tables = run(a.settings, a.data, a.rejects)
+    tables = run(a.settings, a.data, a.rejects, a.source)
 
     print("saved to", DB)
     print()
@@ -118,7 +132,7 @@ if __name__ == "__main__":
         print(f"  {name:<14}{len(t):>6}")
     print()
 
-    # read back from the database, not from memory
+    # read back from the database not from memory
     print("read back from the database:")
     print("  parts :", int(query(DB, "SELECT SUM(parts_added) AS n FROM parts")["n"][0]))
     print("  events:", int(query(DB, "SELECT COUNT(*) AS n FROM events")["n"][0]))
