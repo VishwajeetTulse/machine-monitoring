@@ -11,6 +11,9 @@ import pandas as pd
 # columns that only the simulator knows. A real machine never sends these.
 HIDDEN = ["state"]
 
+# the column stays, but empty: stop reasons only come from the operator
+ANSWERS_TO_BLANK = ["downtime_reason"]
+
 
 def parse_fault(spec, name):
     # "V60,10:00,8" -> machine, start (IST clock), minutes
@@ -52,6 +55,8 @@ def load_csv(path, alarms=(), silents=()):
     # drop the simulator's answers, so the system must work them out
     drop = [c for c in df.columns if c in HIDDEN or c.startswith("_")]
     df = df.drop(columns=drop)
+    for column in ANSWERS_TO_BLANK:
+        df[column] = None
 
     df["_t"] = pd.to_datetime(df["timestamp"])
     df = df.sort_values("_t", kind="stable").reset_index(drop=True)

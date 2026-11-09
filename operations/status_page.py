@@ -84,7 +84,7 @@ def build():
         o = oee_rows.get(m)
 
         reason = None if e is None or pd.isna(e["reason"]) else e["reason"]
-        set_by = "machine" if reason else None
+        set_by = None
         set_at = None
 
         # a tap made since this stop began shows at once, before the next calculation
@@ -354,7 +354,7 @@ function question(m) {
            nice(m.reason) + "</b>, set by operator at " + m.set_at + ".";
   }
   return "<b>" + m.machine + "</b> stopped " + show(m.since_min, " min") + ". Reason <b>" +
-         nice(m.reason) + "</b>, guessed from the machine. Tap to correct it.";
+         nice(m.reason) + "</b>. Tap to correct it.";
 }
 
 function lostLine(m) {

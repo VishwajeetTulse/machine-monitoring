@@ -17,7 +17,8 @@ def oee(events, parts, setup_is_planned, rejects=None):
     machines = [m for m in a.index if m != "ALL"]
  
     # machines that made parts can have an OEE
-    counted = [m for m in machines if p.loc[m, "parts"] > 0]
+    # and only if the ideal time of every part is known
+    counted = [m for m in machines if p.loc[m, "parts"] > 0 and pd.notna(p.loc[m, "ideal_s"])]
 
     if rejects is None:
         entered = pd.Series(dtype=float)
@@ -67,6 +68,8 @@ def oee(events, parts, setup_is_planned, rejects=None):
         n = []
         if not has_parts[m]:
             n.append("no part data")
+        elif m != "ALL" and m not in counted:
+            n.append(p.loc[m, "note"])
         elif not measured[m]:
             n.append("quality not measured")
         if out.loc[m, "oee_pct"] > 90:

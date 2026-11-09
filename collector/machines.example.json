@@ -2,10 +2,13 @@
     "machines": [
       {"code": "V60", "id": "sim-0000", "ip": "127.0.0.1", "port": 8193,
        "ideal_cycle_s": {"3310": 96, "5315": 64, "1509": 284},
-       "params": {"parts_today": 6711, "parts_life": 6712}},
+       "params": {"parts_today": 6711, "parts_life": 6712},
+       "capabilities": {"part_count": true, "cycle_time": true, "cutting_hours": true}},
       {"code": "V61", "id": "sim-0001", "ip": "127.0.0.1", "port": 8193,
-       "ideal_cycle_s": {"3310": 96, "5315": 64, "1509": 284}},
+       "ideal_cycle_s": {"3310": 96, "5315": 64, "1509": 284},
+       "capabilities": {"part_count": true, "cycle_time": true, "cutting_hours": true}},
       {"code": "V62", "id": "sim-0002", "ip": "127.0.0.1", "port": 8193,
-       "ideal_cycle_s": {"3310": 96, "5315": 64, "1509": 284}}
+       "ideal_cycle_s": {"3310": 96, "5315": 64, "1509": 284},
+       "capabilities": {"part_count": true, "cycle_time": true, "cutting_hours": true}}
     ]
   }

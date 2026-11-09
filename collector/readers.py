@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 import pandas as pd
 
-from readings import COLUMNS
+from readings import COLUMNS, SIMULATOR_ANSWERS, unsupported_columns
 
 
 class ReaderError(Exception):
@@ -29,7 +29,8 @@ class FakeReader:
             raise ReaderError(f"no rows for machine {self.code} in {csv_path}")
 
         # keep only the real columns. The simulator's own answers are dropped.
-        df = df.sort_values("timestamp")[[c for c in COLUMNS if c in df.columns]]
+        keep = [c for c in COLUMNS if c in df.columns and c not in SIMULATOR_ANSWERS]
+        df = df.sort_values("timestamp")[keep]
         self.rows = df.astype(object).where(df.notna(), None).to_dict("records")
         self.next = 0
         self.outage = outage            # (start_second, length_seconds) after starting
@@ -89,6 +90,12 @@ class FocasReader:
         self.machine = machine
         self.timeout = timeout
         self.params = {**DEFAULT_PARAMS, **machine.get("params", {})}
+
+        # never ask for a value this machine cannot give: a failed parameter
+        # read would make the whole machine look silent
+        for column in unsupported_columns(machine.get("capabilities", {})):
+            self.params.pop(column, None)
+
         self.ideal = {str(k): v for k, v in machine.get("ideal_cycle_s", {}).items()}
 
         if not hasattr(ctypes, "WinDLL"):

@@ -17,6 +17,42 @@ COLUMNS = {
     "override_feed": "INTEGER", "alarm_code": "INTEGER", "alarm_text": "REAL",
 }
 
+# only the simulator knows these. A real machine cannot say why it stopped.
+SIMULATOR_ANSWERS = ["downtime_reason"]
+
+# what a machine may be unable to report, and the columns that depend on it
+CAPABILITY_COLUMNS = {
+    "part_count": ["parts_today", "parts_life"],
+    "cycle_time": ["last_cycle_ms"],
+    "cutting_hours": ["cutting_min"],
+}
+
+
+def check_capabilities(code, capabilities):
+    # a misspelt name would be ignored silently, so stop on it
+    unknown = set(capabilities) - set(CAPABILITY_COLUMNS)
+    if unknown:
+        raise ValueError(f"machine {code}: unknown capability: {sorted(unknown)}")
+    for name, value in capabilities.items():
+        if not isinstance(value, bool):
+            raise ValueError(f"machine {code}: capability {name} must be true or false")
+
+
+def unsupported_columns(capabilities):
+    # a capability that is not mentioned counts as available
+    columns = []
+    for name, depends in CAPABILITY_COLUMNS.items():
+        if not capabilities.get(name, True):
+            columns += depends
+    return columns
+
+
+def blank_unsupported(row, columns):
+    # empty, never zero, so the calculations can say "no data"
+    for c in columns:
+        row[c] = None
+    return row
+
 
 def open_db(path):
     Path(path).parent.mkdir(parents=True, exist_ok=True)

@@ -41,6 +41,11 @@ def data_clock(results_db):
     return None if last is None or pd.isna(last) else pd.to_datetime(last, utc=True)
 
 
+def pct(value):
+    # a number that could not be worked out is shown as such, not as "None%"
+    return "not available" if value is None or pd.isna(value) else f"{value}%"
+
+
 def write_text(client, rows):
     first = rows.iloc[0]
     lines = [f"Shift report: {first['shift']}, {first['date']} ({first['window']} IST)", client, ""]
@@ -49,8 +54,8 @@ def write_text(client, rows):
     lines.append("")
 
     for _, r in rows.iterrows():
-        lines.append(f"{r['machine']}: {r['parts']} parts | OEE {r['oee_pct']}% "
-                     f"(availability {r['availability_pct']}%, performance {r['performance_pct']}%)")
+        lines.append(f"{r['machine']}: {r['parts']} parts | OEE {pct(r['oee_pct'])} "
+                     f"(availability {pct(r['availability_pct'])}, performance {pct(r['performance_pct'])})")
         lines.append(f"  Stops: {r['stops']}, {r['downtime_min']} min down")
 
         top = json.loads(r["top_reasons"])
