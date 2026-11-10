@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib.patches import Patch
  
-from test_classification import classify_frame, NO_DATA
+from test_classification import classify_frame, NO_DATA, NOT_RESPONDING, PLANNED_STOP
 from state_events import to_events, mark_setup
 from settings import load_settings
 
@@ -20,6 +20,8 @@ COLOURS = {
     "ALARM": "#D64545",     # red
     "OFF": "#B5B5B5",       # grey
     NO_DATA: "#E9A6C6",     # pink
+    NOT_RESPONDING: "#7A3E9D",  # purple
+    PLANNED_STOP: "#DDDDD6",    # light grey
 }
 
 def draw_timeline(events, path, zone, title="Machine timeline"):

@@ -34,9 +34,18 @@ def performance(events, parts):
     }, index=sorted(events["machine"].unique())).fillna(0)
     table["parts"] = table["parts"].astype(int)
 
+    # a part with no ideal time cannot be judged. Leave the number blank:
+    # adding up only the known ones would make the machine look slow.
+    unknown = parts[parts["ideal_s"].isna()]
+    programs = {
+        machine: sorted({int(p) for p in g["program_number"].dropna()})
+        for machine, g in unknown.groupby("machine")
+    }
+    table.loc[list(programs), "ideal_s"] = float("nan")
+
     # one row for all machines together
     # only machines that made parts, or the run time would be too big
-    counted = table[table["parts"] > 0]
+    counted = table[(table["parts"] > 0) & table["ideal_s"].notna()]
     table.loc["ALL"] = [counted["parts"].sum(), counted["ideal_s"].sum(), counted["run_s"].sum()]
     table["parts"] = table["parts"].astype(int)
 
@@ -49,6 +58,9 @@ def performance(events, parts):
     table["note"] = ""
     table.loc[table["parts"] == 0, "note"] = "no part data"
     table.loc[table["performance_pct"] > 100, "note"] = "check ideal time"
+    for machine, numbers in programs.items():
+        names = ", ".join(str(n) for n in numbers) or "unknown"
+        table.loc[machine, "note"] = f"ideal time missing for program {names}"
 
     return table
 

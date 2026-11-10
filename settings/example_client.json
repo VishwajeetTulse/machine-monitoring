@@ -3,7 +3,8 @@
   "timezone": "Asia/Kolkata",
 
   "shifts": [
-    {"name": "Shift 1", "start": "07:00", "end": "15:00"}
+    {"name": "Shift 1", "start": "07:00", "end": "15:00",
+     "breaks": [{"start": "12:30", "end": "13:00"}]}
   ],
 
   "setup_is_planned": false,

@@ -1,13 +1,15 @@
 # runs the whole system again and again, so nobody has to type commands
 
 import argparse
+import os
 import time
 from datetime import datetime
 
 import alerts
 import shift_report
-from run_all import run
+from run_all import LIVE_DB, NoReadings, run
 from settings import load_settings
+from store import clock_mode, live_now
 
 
 def one_line(tables):
@@ -15,6 +17,14 @@ def one_line(tables):
     all_row = tables["oee"][tables["oee"]["machine"] == "ALL"].iloc[0]
     oee = all_row["oee_pct"]
     return f"parts {parts:>4}   availability {all_row['availability_pct']:>5}%   OEE {oee:>5}%"
+
+
+def show(result):
+    opened, cleared = result
+    for c in opened:
+        print(f"          ALERT    {c['rule']:<12}{c['message']}")
+    for c in cleared:
+        print(f"          cleared  {c['rule']:<12}{c['message']}")
 
 
 if __name__ == "__main__":
@@ -30,6 +40,9 @@ if __name__ == "__main__":
     a = p.parse_args()
 
     settings = load_settings(a.settings)
+
+    # a fresh checkout has no output folder yet
+    os.makedirs("output", exist_ok=True)
 
     if a.fresh:
         alerts.reset()
@@ -47,15 +60,21 @@ if __name__ == "__main__":
 
                 # alerts only make sense on live readings
                 if a.source == "live":
-                    opened, cleared = alerts.check(settings)
-                    for c in opened:
-                        print(f"          ALERT    {c['rule']:<12}{c['message']}")
-                    for c in cleared:
-                        print(f"          cleared  {c['rule']:<12}{c['message']}")
+                    show(alerts.check(settings))
 
                 # a finished shift gets its report once
-                for w in shift_report.check(settings):
+                # live readings stop when the machines do, so the clock decides
+                real = a.source == "live" and clock_mode(LIVE_DB) == "real"
+                for w in shift_report.check(settings, now=live_now(LIVE_DB) if real else None):
                     print(f"          REPORT   {w['shift']} {w['date']} saved to {w['file']}")
+            except NoReadings as e:
+                print(f"{now}  not saved: {e}")
+                # nothing to calculate, which is exactly when silence must be reported
+                if a.source == "live":
+                    try:
+                        show(alerts.check(settings, silent_only=True))
+                    except Exception as e2:
+                        print(f"{now}  alerts not checked: {type(e2).__name__}: {e2}")
             except Exception as e:
                 # keep going. A bad moment must not stop the loop.
                 print(f"{now}  not saved: {type(e).__name__}: {e}")

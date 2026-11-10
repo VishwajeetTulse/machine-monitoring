@@ -1,6 +1,6 @@
 import pandas as pd
  
-from test_classification import classify_frame, IDLE, SETUP
+from test_classification import classify_frame, STOPS
 from state_events import to_events, mark_setup
 from settings import load_settings
  
@@ -9,7 +9,7 @@ def downtime_by_reason(events):
  
     # keep only the stops
     # OFF is not here: lunch is planned, not a loss
-    stops = events[events["state"].isin([IDLE, SETUP])].copy()
+    stops = events[events["state"].isin(STOPS)].copy()
  
     # a stop with no reason still counts
     stops["reason"] = stops["reason"].fillna("UNKNOWN")

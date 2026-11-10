@@ -47,6 +47,13 @@ def drift(parts, window, watch_pct, act_pct):
         watch_at = avg[avg >= watch_pct].index.min()
         act_at = avg[avg >= act_pct].index.min()
 
+        # no cycle times: say so, never "OK"
+        if pd.isna(now):
+            row.update(start_pct=None, now_pct=None, crossed_watch_at=None,
+                       crossed_act_at=None, status="NO DATA")
+            rows.append(row)
+            continue
+
         if now >= act_pct:
             status = "ACT"
         elif now >= watch_pct:

@@ -40,8 +40,9 @@ def to_parts(df):
         "parts_added": finished["parts_added"].astype(int),
 
         # ms to sec 
-        "cycle_s": finished["last_cycle_ms"] / 1000,
-        "ideal_s": finished["ideal_cycle_ms"] / 1000,
+        # empty when the machine or the file does not give it
+        "cycle_s": pd.to_numeric(finished["last_cycle_ms"], errors="coerce") / 1000,
+        "ideal_s": pd.to_numeric(finished["ideal_cycle_ms"], errors="coerce") / 1000,
     }).reset_index(drop=True)
 
     parts["slower_pct"] = (

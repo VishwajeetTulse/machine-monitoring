@@ -4,7 +4,7 @@ import json
 
 import pandas as pd
 
-from test_classification import classify_frame, IDLE, SETUP
+from test_classification import classify_frame, STOPS
 from state_events import to_events, mark_setup
 from part_counting import to_parts
 from downtime import downtime_by_reason
@@ -85,7 +85,7 @@ def summarise(events, parts, shifts, setup_is_planned, zone):
         for m in sorted(ev["machine"].unique()):
  
             mine = ev[ev["machine"] == m]
-            stops = mine[mine["state"].isin([IDLE, SETUP])]
+            stops = mine[mine["state"].isin(STOPS)]
             row = o.loc[m]
  
             # from operation 4

@@ -10,6 +10,7 @@ DEFAULTS = {
     "setup_min_seconds": 300,
     "gap_seconds": 5,
     "drift": {"window": 10, "watch_pct": 5, "act_pct": 10},
+    "weekly_off": [],            # for example ["Sunday"]
     "failure_alarm_codes": [],   # empty = every alarm counts
     "maintenance_jobs": [],
     "last_done": {},
@@ -26,6 +27,36 @@ DEFAULTS = {
 
 # no default. It changes the OEE number, so the file must say it
 REQUIRED = ["client", "shifts", "setup_is_planned"]
+
+
+WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+
+def minutes(text):
+    # "07:30" -> 450
+    t = datetime.strptime(text, "%H:%M")
+    return t.hour * 60 + t.minute
+
+
+def shift_minutes(shift):
+    # start and end of a shift, in minutes from the midnight it starts after
+    start, end = minutes(shift["start"]), minutes(shift["end"])
+    return start, end + 1440 if end <= start else end
+
+
+def break_minutes(shift):
+    # the breaks of a shift, on the same scale as shift_minutes
+    start, _ = shift_minutes(shift)
+    out = []
+    for b in shift["breaks"]:
+        begin = minutes(b["start"])
+        if begin < start:
+            begin += 1440
+        finish = minutes(b["end"])
+        while finish <= begin:
+            finish += 1440
+        out.append((begin, finish))
+    return sorted(out)
 
 
 def load_settings(path):
@@ -62,11 +93,26 @@ def check(s):
     if not s["shifts"]:
         raise ValueError("shifts cannot be empty")
     for sh in s["shifts"]:
-        for key in ("name", "start", "end"):
+        # breaks has no default. It changes the OEE number, so the file must say it
+        for key in ("name", "start", "end", "breaks"):
             if key not in sh:
                 raise ValueError(f"every shift needs: {key}")
         for key in ("start", "end"):
             datetime.strptime(sh[key], "%H:%M")
+
+        begin, finish = shift_minutes(sh)
+        for b in sh["breaks"]:
+            if "start" not in b or "end" not in b:
+                raise ValueError("every break needs: start, end")
+            datetime.strptime(b["start"], "%H:%M")
+            datetime.strptime(b["end"], "%H:%M")
+        for b_start, b_end in break_minutes(sh):
+            if b_start < begin or b_end > finish:
+                raise ValueError(f"{sh['name']}: a break is outside the shift")
+
+    wrong = set(s["weekly_off"]) - set(WEEKDAYS)
+    if wrong:
+        raise ValueError(f"weekly_off: not a day: {sorted(wrong)}")
 
     if s["setup_min_seconds"] <= 0 or s["gap_seconds"] <= 0:
         raise ValueError("setup_min_seconds and gap_seconds must be above 0")

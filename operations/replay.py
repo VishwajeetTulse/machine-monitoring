@@ -11,6 +11,9 @@ import pandas as pd
 # columns that only the simulator knows. A real machine never sends these.
 HIDDEN = ["state"]
 
+# the column stays, but empty: stop reasons only come from the operator
+ANSWERS_TO_BLANK = ["downtime_reason"]
+
 
 def parse_fault(spec, name):
     # "V60,10:00,8" -> machine, start (IST clock), minutes
@@ -52,6 +55,8 @@ def load_csv(path, alarms=(), silents=()):
     # drop the simulator's answers, so the system must work them out
     drop = [c for c in df.columns if c in HIDDEN or c.startswith("_")]
     df = df.drop(columns=drop)
+    for column in ANSWERS_TO_BLANK:
+        df[column] = None
 
     df["_t"] = pd.to_datetime(df["timestamp"])
     df = df.sort_values("_t", kind="stable").reset_index(drop=True)
@@ -63,6 +68,7 @@ def create_table(con, df):
     kinds = {"i": "INTEGER", "u": "INTEGER", "f": "REAL"}
     cols = ", ".join(f'"{c}" {kinds.get(df[c].dtype.kind, "TEXT")}' for c in df.columns if c != "_t")
     con.execute(f"CREATE TABLE IF NOT EXISTS readings ({cols})")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_readings_time ON readings (timestamp)")
     con.commit()
 
 
@@ -97,7 +103,15 @@ def replay(data_path, db_path, speed, keep=False, alarms=(), silents=()):
         con.execute("DROP TABLE IF EXISTS readings")
         # new readings, so old operator taps no longer belong to them
         con.execute("DROP TABLE IF EXISTS reasons")
+        # these describe a real collector, not this recording
+        con.execute("DROP TABLE IF EXISTS heartbeat")
+        con.execute("DROP TABLE IF EXISTS machines")
         con.commit()
+
+    # old readings, so "now" is the newest reading and not the real time
+    con.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
+    con.execute("INSERT OR REPLACE INTO meta VALUES ('clock', 'data')")
+    con.commit()
 
     create_table(con, df)
 
